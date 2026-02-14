@@ -7,14 +7,14 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#000000',
     color: '#c0c0c0',
     fontFamily: "'Courier New', Courier, monospace",
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundImage: 'radial-gradient(circle at center, #1a1a1a 0%, #000000 100%)',
+    backgroundImage: 'radial-gradient(circle at center, #95561c 0%, #635145 100%)',
     overflow: 'hidden',
   },
   heading: {
@@ -72,7 +72,7 @@ function App() {
       <img style={styles.image} id="output" width="200" src={image} />
       <input style={styles.fileInput} type="file" accept="image/*" id="file_input" onInput={(event) => setImage(URL.createObjectURL(event.target.files[0]))} />
 
-      <button style={styles.button}>Check</button>
+      <button style={styles.button}>Check image</button>
     </div>
   );
 }
