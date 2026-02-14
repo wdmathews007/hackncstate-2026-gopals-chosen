@@ -1,0 +1,49 @@
+# ── Nix ──────────────────────────────────────────────────────────────────────
+result
+result-*
+.direnv/
+
+# ── Agent / AI assistant files ────────────────────────────────────────────────
+agents.md
+.claude/
+CLAUDE.md
+.cursor/
+.aider*
+.copilot/
+*.ai.md
+
+# ── Node / npm ────────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm/
+.pnpm-store/
+
+# ── Vite / build output ───────────────────────────────────────────────────────
+dist/
+dist-ssr/
+*.local
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Editors ───────────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
