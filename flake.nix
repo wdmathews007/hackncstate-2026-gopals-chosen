@@ -1,5 +1,5 @@
 {
-  description = "hackncstate-2026-gopals-chosen — React 19 + Vite 7 dev environment";
+  description = "Smoke and Mirrors";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -10,20 +10,22 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        pythonEnv = pkgs.python3.withPackages (ps: with ps; [
+          fastapi
+          uvicorn
+          python-multipart
+          pillow
+          exifread
+          opencv4
+        ]);
       in
       {
         devShells.default = pkgs.mkShell {
-          name = "hackncstate-2026";
-
           packages = with pkgs; [
-            nodejs_22   # Node.js 22.22.0
+            nodejs_22
             nodePackages.npm
+            pythonEnv
           ];
-
-          shellHook = ''
-            echo "Node $(node --version) | npm $(npm --version)"
-            echo "Run 'cd my-react-app && npm install && npm run dev' to start."
-          '';
         };
       });
 }
