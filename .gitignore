@@ -58,9 +58,10 @@ backend/.env.*
 __pycache__/
 *.py[cod]
 
-# ── Model checkpoints (large, local-only) ──────────────────────────────────────
+# ── Model checkpoints ───────────────────────────────────────────────────────────
 backend/models/*.pth
 backend/models/*.pt
+!backend/models/best_resnet50_model.pth
 
 # ── Runtime uploads ────────────────────────────────────────────────────────────
 backend/upload/pictures/*

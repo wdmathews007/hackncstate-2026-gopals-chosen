@@ -12,14 +12,30 @@ const SPREAD_MIN_EVIDENCE_SCORE = Number.parseInt(import.meta.env.VITE_SPREAD_MI
 const SPREAD_MAX_PER_DOMAIN = Number.parseInt(import.meta.env.VITE_SPREAD_MAX_PER_DOMAIN || '2', 10) || 2
 
 function deriveVerdict(uploadResult) {
+  const classifierSubtype = String(uploadResult?.analysis?.classifier_subtype || '').toLowerCase()
   const classifierLabel = String(uploadResult?.analysis?.label || '').toLowerCase()
   const metadataLabel = String(uploadResult?.analysis?.metadata?.likely_edited || '').toLowerCase()
+  const metadataSoftware = String(uploadResult?.analysis?.metadata?.software || '').toLowerCase()
+  const metadataKeywords = (uploadResult?.analysis?.metadata?.keywords || []).join(' ').toLowerCase()
+  const metadataAiSignal = ['midjourney', 'dalle', 'stable diffusion', 'stablediffusion', 'ai'].some(
+    (token) => metadataSoftware.includes(token) || metadataKeywords.includes(token)
+  )
 
-  if (metadataLabel.includes('real')) return 'real'
-  if (metadataLabel.includes('edited') || metadataLabel.includes('fake')) return 'fake'
+  if (metadataLabel.includes('real') && classifierSubtype !== 'ai' && classifierSubtype !== 'spliced') {
+    return 'real'
+  }
+
+  if (classifierSubtype === 'ai') return 'ai'
+  if (classifierSubtype === 'spliced') return 'edited'
+
+  if (metadataLabel.includes('edited') || metadataLabel.includes('fake')) {
+    return metadataAiSignal ? 'ai' : 'edited'
+  }
+
   if (classifierLabel.includes('real')) return 'real'
-  if (classifierLabel.includes('fake') || classifierLabel.includes('ai') || classifierLabel.includes('edit')) {
-    return 'fake'
+  if (classifierLabel.includes('ai')) return 'ai'
+  if (classifierLabel.includes('fake') || classifierLabel.includes('edit')) {
+    return 'edited'
   }
 
   return 'unknown'
@@ -162,7 +178,7 @@ function App() {
     }
   }
 
-  const verdict = FORCE_FAKE_VERDICT ? 'fake' : deriveVerdict(result)
+  const verdict = FORCE_FAKE_VERDICT ? 'ai' : deriveVerdict(result)
 
   if (phase === 'investigate' && spreadData) {
     return (

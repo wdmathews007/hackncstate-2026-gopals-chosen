@@ -169,6 +169,16 @@ body {
   color: #de8a84;
 }
 
+.verdict-ai {
+  border-color: #4d7f9a;
+  color: #9cc7de;
+}
+
+.verdict-edited {
+  border-color: var(--blood-red);
+  color: #de8a84;
+}
+
 .verdict-unknown {
   border-color: var(--amber);
   color: #e0bf84;

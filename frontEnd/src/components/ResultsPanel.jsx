@@ -11,15 +11,22 @@ function ResultsPanel({
   const metadata = result?.analysis?.metadata || {}
   const badgeClass = verdict === 'real'
     ? 'verdict-badge verdict-real'
-    : verdict === 'fake'
-      ? 'verdict-badge verdict-fake'
-      : 'verdict-badge verdict-unknown'
+    : verdict === 'ai'
+      ? 'verdict-badge verdict-ai'
+      : verdict === 'edited'
+        ? 'verdict-badge verdict-edited'
+        : 'verdict-badge verdict-unknown'
 
   const verdictText = verdict === 'real'
     ? 'REAL'
-    : verdict === 'fake'
-      ? 'FAKE / EDITED'
-      : 'INCONCLUSIVE'
+    : verdict === 'ai'
+      ? 'AI-GENERATED'
+      : verdict === 'edited'
+        ? 'EDITED / MANIPULATED'
+        : 'INCONCLUSIVE'
+
+  const classifierSubtype = result?.analysis?.classifier_subtype || 'unknown'
+  const canInvestigate = verdict === 'ai' || verdict === 'edited'
 
   return (
     <section className="results-panel">
@@ -37,11 +44,12 @@ function ResultsPanel({
           <div className="result-grid">
             <p><strong>File:</strong> {result.filename}</p>
             <p><strong>Classifier:</strong> {result?.analysis?.label || 'unknown'}</p>
+            <p><strong>Subtype:</strong> {classifierSubtype}</p>
             <p><strong>Metadata signal:</strong> {metadata?.likely_edited || 'Unknown'}</p>
             <p><strong>Software tag:</strong> {metadata?.software || 'n/a'}</p>
           </div>
 
-          {verdict === 'fake' && (
+          {canInvestigate && (
             <button
               className="investigate-button"
               onClick={onInvestigate}
