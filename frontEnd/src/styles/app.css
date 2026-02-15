@@ -1,0 +1,93 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+.container {
+  min-height: 100vh;
+  width: 100%;
+  background-color: #000000;
+  color: #c0c0c0;
+  font-family: 'Courier New', Courier, monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-image: radial-gradient(circle at center, #95561c 0%, #635145 100%);
+  overflow-y: auto;
+  padding: 2rem 1rem;
+}
+/* === Header === */
+.heading {
+  font-size: 2.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 1.5rem;
+  text-shadow: 0px 0px 8px rgba(255, 255, 255, 0.2);
+  border-bottom: 1px solid #333;
+  padding-bottom: 10px;
+  text-align: center;
+}
+/* === Upload Form === */
+.file-input {
+  margin-bottom: 15px;
+  padding: 10px;
+  background-color: #111;
+  color: #aaa;
+  border: 1px solid #333;
+}
+.preview-image {
+  margin-top: 15px;
+  margin-bottom: 20px;
+  border: 1px solid #222;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.9);
+  filter: grayscale(100%) contrast(120%) brightness(90%);
+  max-height: 40vh;
+  max-width: 90%;
+  object-fit: contain;
+}
+.check-button {
+  padding: 10px 25px;
+  font-size: 1rem;
+  background-color: #1a1a1a;
+  color: #ddd;
+  border: 1px solid #444;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transition: background-color 0.3s, border-color 0.3s;
+  font-family: 'Courier New', Courier, monospace;
+}
+.check-button:hover {
+  background-color: #333;
+  border-color: #666;
+}
+.check-button:active {
+  background-color: #444;
+}
+.check-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+/* === Results Panel === */
+.error-message {
+  color: #cc3333;
+  margin-top: 1rem;
+  text-align: center;
+}
+.result-output {
+  color: #aaa;
+  margin-top: 1rem;
+  max-width: 90%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* === Loading Animation === */
+.loading-text {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
