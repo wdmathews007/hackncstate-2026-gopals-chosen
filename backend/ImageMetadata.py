@@ -23,9 +23,9 @@ class ImageMetadata:
         self._caption = None
         self.keywords = []
         self.author = None
-        self.date_created = None
-        self.time_created = None
+        self.iptc_date_created = None
 
+        # Extract metadata
         self._extract_exif()
         self._extract_iptc()
 
@@ -86,35 +86,33 @@ class ImageMetadata:
 
     def _extract_iptc(self):
         try:
-            if not hasattr(self.image, "filename") or not self.image.filename:
+            if hasattr(self.image, 'filename') and self.image.filename:
+                info = IPTCInfo(self.image.filename)
+            else:
                 return
 
-            info = IPTCInfo(self.image.filename, force=True)
+            # Extract IPTC fields
+            self._caption = info.get("caption/abstract")
+            self.keywords = info.get("keywords") or []
+            if isinstance(self.keywords, str):
+                self.keywords = [self.keywords]
+            self.author = info.get("byline")
 
-            for key in info._data:
-                value = info[key]
-                if value:
-                    self.iptc[key] = value
-
-            # Extract specific fields safely
-            self._caption = self.iptc.get("caption/abstract")
-
-            keywords = self.iptc.get("keywords", [])
-            if isinstance(keywords, bytes):
-                keywords = [keywords.decode()]
-            elif isinstance(keywords, list):
-                keywords = [
-                    k.decode() if isinstance(k, bytes) else k
-                    for k in keywords
-                ]
-
-            self.keywords = keywords
-            self.author = self.iptc.get("by-line")
-            self.date_created = self.iptc.get("date created")
-            self.time_created = self.iptc.get("time created")
+            # IPTC date
+            date_str = info.get("date created")
+            time_str = info.get("time created")
+            if date_str:
+                try:
+                    dt = datetime.strptime(date_str, "%Y%m%d")
+                    if time_str:
+                        dt = datetime.combine(dt.date(), datetime.strptime(time_str, "%H%M%S").time())
+                    self.iptc_date_created = dt
+                except:
+                    self.iptc_date_created = None
 
         except Exception as e:
             print(f"IPTC extraction failed: {e}")
+
 
     @property
     def caption(self):
@@ -158,3 +156,27 @@ class ImageMetadata:
             except:
                 return dt
         return None
+    
+    @property
+    def software(self):
+        val = self.exif.get("Software")
+        if val:
+            return str(val)  # ensure it’s a string
+        return None
+    
+    @property
+    def is_likely_edited(self):
+        if self.gps_longitude is not None and self.gps_lattitude is not None:
+            return "Likely Real"
+        
+        # Check software for editing or AI tools
+        suspicious_software = ["photoshop", "lightroom", "midjourney", "dalle", "stable diffusion"]
+        if self.software and any(word in self.software.lower() for word in suspicious_software):
+            return "Likely Edited"
+
+        # Check IPTC keywords
+        if self.keywords:
+            lower_keywords = [k.lower() for k in self.keywords if isinstance(k, str)]
+            if any(word in lower_keywords for word in ["ai", "midjourney", "dalle", "photoshop"]):
+                return "Likely Edited"
+
