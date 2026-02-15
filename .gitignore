@@ -57,3 +57,7 @@ backend/.env.*
 # ── Python cache ──────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+
+# ── Runtime uploads ────────────────────────────────────────────────────────────
+backend/upload/pictures/*
+!backend/upload/pictures/.gitkeep
