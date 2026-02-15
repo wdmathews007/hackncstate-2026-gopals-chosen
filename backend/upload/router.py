@@ -5,8 +5,10 @@ from PIL import Image, UnidentifiedImageError
 
 try:
     from ..ImageMetadata import ImageMetadata
+    from ..analyze.inference import predict as classify_image
 except ImportError:
     from ImageMetadata import ImageMetadata
+    from analyze.inference import predict as classify_image
 
 
 router = APIRouter(tags=["upload"])
@@ -66,6 +68,7 @@ async def upload_file(file: UploadFile = File(...)):
 
         with Image.open(saved_path) as image:
             metadata = ImageMetadata(image).to_dict()
+            classification = classify_image(image)
 
     except UnidentifiedImageError as exc:
         if saved_path.exists():
@@ -91,8 +94,10 @@ async def upload_file(file: UploadFile = File(...)):
         "status": "uploaded",
         "file_path": str(saved_path),
         "analysis": {
-            "label": "unknown",
-            "confidence": 0.0,
+            "label": classification["label"],
+            "confidence": classification["confidence"],
+            "classifier_subtype": classification.get("classifier_subtype"),
+            "class_probs": classification.get("class_probs"),
             "metadata": metadata,
             "heatmap_url": None,
         },

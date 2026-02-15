@@ -232,6 +232,25 @@ body {
   z-index: 20;
 }
 
+.spread-status {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  border: 1px solid #6b5d4f;
+  background: rgba(15, 13, 11, 0.9);
+  color: var(--paper-200);
+  padding: 0.35rem 0.55rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.spread-status-live {
+  border-color: var(--moss);
+  color: #b8cfb0;
+}
+
 .node-drawer {
   position: absolute;
   left: 12px;
@@ -460,6 +479,15 @@ body {
   .back-button {
     font-size: 0.76rem;
     padding: 0.45rem 0.6rem;
+  }
+
+  .spread-status {
+    font-size: 0.65rem;
+    padding: 0.3rem 0.45rem;
+    max-width: calc(100% - 120px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .node-drawer {

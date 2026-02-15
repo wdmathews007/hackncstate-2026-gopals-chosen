@@ -9,6 +9,7 @@ const PLATFORM_ICONS = {
   news: "N",
   "4chan": "4",
   imgur: "im",
+  upload: "UP",
 }
 
 function PinnedPhoto({
@@ -22,6 +23,7 @@ function PinnedPhoto({
   isActive,
 }) {
   const [visible, setVisible] = useState(false)
+  const [faviconFailed, setFaviconFailed] = useState(false)
 
   useEffect(() => {
     const timer = setTimeout(() => setVisible(true), animDelay || 0)
@@ -29,6 +31,19 @@ function PinnedPhoto({
   }, [animDelay])
 
   const icon = PLATFORM_ICONS[node.platform] || "?"
+
+  let nodeHost = null
+  let faviconUrl = null
+  if (node?.url) {
+    try {
+      const parsed = new URL(node.url)
+      nodeHost = parsed.hostname.replace(/^www\./, '')
+      faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(nodeHost)}&sz=128`
+    } catch {
+      nodeHost = null
+      faviconUrl = null
+    }
+  }
 
   const classes = [
     "pinned-photo",
@@ -60,6 +75,17 @@ function PinnedPhoto({
       <div className="polaroid">
         {isUploaded && uploadedImage ? (
           <img className="polaroid-image" src={uploadedImage} alt="Uploaded" />
+        ) : faviconUrl && !faviconFailed ? (
+          <div className="polaroid-placeholder node-preview">
+            <img
+              className="node-favicon"
+              src={faviconUrl}
+              alt=""
+              aria-hidden="true"
+              onError={() => setFaviconFailed(true)}
+            />
+            <span className="node-preview-domain">{nodeHost}</span>
+          </div>
         ) : (
           <div className="polaroid-placeholder">
             <span className="platform-icon">{icon}</span>
@@ -67,7 +93,7 @@ function PinnedPhoto({
         )}
         <div className="polaroid-label">
           <span className="polaroid-name">{node.label}</span>
-          <span className="polaroid-date">{node.date}</span>
+          <span className="polaroid-date">{node.date || 'Unknown time'}</span>
         </div>
       </div>
       {isSource && <div className="source-stamp">SOURCE</div>}

@@ -4,12 +4,11 @@ import Header from './components/Header'
 import UploadForm from './components/UploadForm'
 import ResultsPanel from './components/ResultsPanel'
 import CorkBoard from './components/CorkBoard'
-import MOCK_SPREAD_MEDIUM from './data/mockSpread'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-const FORCE_LOCAL_SPREAD_MOCK = import.meta.env.VITE_FORCE_LOCAL_SPREAD_MOCK === 'true'
-const USE_SPREAD_FALLBACK = import.meta.env.VITE_USE_SPREAD_FALLBACK !== 'false'
-const FORCE_FAKE_VERDICT = import.meta.env.VITE_FORCE_FAKE_VERDICT !== 'false'
+const FORCE_FAKE_VERDICT = import.meta.env.VITE_FORCE_FAKE_VERDICT === 'true'
+const SPREAD_STRICT_FILTER = import.meta.env.VITE_SPREAD_STRICT_FILTER !== 'false'
+const SPREAD_MIN_EVIDENCE_SCORE = Number.parseInt(import.meta.env.VITE_SPREAD_MIN_EVIDENCE_SCORE || '130', 10) || 130
 
 function deriveVerdict(uploadResult) {
   const classifierLabel = String(uploadResult?.analysis?.label || '').toLowerCase()
@@ -110,37 +109,52 @@ function App() {
 
     setSpreadLoading(true)
     setSpreadError(null)
-
-    if (FORCE_LOCAL_SPREAD_MOCK) {
-      setSpreadData(MOCK_SPREAD_MEDIUM)
-      setPhase('investigate')
-      setSpreadLoading(false)
-      return
-    }
+    setSpreadData(null)
 
     try {
       const formData = new FormData()
       formData.append('file', file)
 
-      const response = await fetch(
-        `${API_BASE_URL}/spread?use_mock_fallback=${USE_SPREAD_FALLBACK ? 'true' : 'false'}`,
-        {
-          method: 'POST',
-          body: formData,
-        }
-      )
+      const spreadParams = new URLSearchParams({
+        strict_filter: String(SPREAD_STRICT_FILTER),
+        min_evidence_score: String(SPREAD_MIN_EVIDENCE_SCORE),
+      })
+
+      const response = await fetch(`${API_BASE_URL}/spread?${spreadParams.toString()}`, {
+        method: 'POST',
+        body: formData,
+      })
 
       if (!response.ok) {
-        throw new Error('Spread lookup failed')
+        let detail = 'Spread lookup failed'
+        try {
+          const payload = await response.json()
+          const apiDetail = payload?.detail
+          if (typeof apiDetail === 'string') {
+            detail = apiDetail
+          } else if (apiDetail && typeof apiDetail === 'object') {
+            const msg = apiDetail.message || detail
+            detail = apiDetail.code ? `[${apiDetail.code}] ${msg}` : msg
+          }
+        } catch {
+          const text = await response.text()
+          if (text) detail = text
+        }
+        throw new Error(detail)
       }
 
       const data = await response.json()
+      const totalMatches = Number(data?.summary?.total_matches || 0)
+      if (totalMatches < 1) {
+        setSpreadData(null)
+        setPhase('results')
+        setSpreadError('No external matches found yet from live spread search.')
+        return
+      }
       setSpreadData(data)
       setPhase('investigate')
-    } catch {
-      setSpreadError('Spread lookup failed. Using local mock graph for now.')
-      setSpreadData(MOCK_SPREAD_MEDIUM)
-      setPhase('investigate')
+    } catch (err) {
+      setSpreadError(err.message || 'Spread lookup failed')
     } finally {
       setSpreadLoading(false)
     }

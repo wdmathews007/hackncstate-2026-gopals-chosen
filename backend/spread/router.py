@@ -1,6 +1,6 @@
 import base64
 import os
-from datetime import date, timedelta
+import re
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -30,6 +30,47 @@ TRACKING_QUERY_KEYS = {
     "utm_term",
 }
 
+IMAGE_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".svg",
+}
+
+LOW_SIGNAL_PATH_HINTS = {
+    "/api/",
+    "thumbnail",
+    "thumb",
+    "sprite",
+    "logo",
+    "icon",
+    "visual-guidelines",
+}
+
+STOP_WORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "this",
+    "that",
+    "from",
+    "into",
+    "your",
+    "about",
+    "have",
+    "has",
+    "are",
+    "was",
+    "were",
+    "will",
+    "not",
+}
+
 
 class VisionAPIError(Exception):
     def __init__(self, message: str, *, status: str | None = None, code: int | None = None):
@@ -37,6 +78,14 @@ class VisionAPIError(Exception):
         self.message = message
         self.status = status
         self.code = code
+
+
+def _error_detail(message: str, *, code: str, **extra) -> dict:
+    detail = {"code": code, "message": message}
+    for key, value in extra.items():
+        if value is not None:
+            detail[key] = value
+    return detail
 
 
 def _sanitize_error_message(message: str | None) -> str:
@@ -104,6 +153,109 @@ def _label_from_url(url: str) -> str:
     return host or "unknown source"
 
 
+def _tokenize(text: str | None) -> set[str]:
+    if not text:
+        return set()
+    tokens = set(re.findall(r"[a-z0-9]{3,}", text.lower()))
+    return {token for token in tokens if token not in STOP_WORDS}
+
+
+def _query_terms(web_detection: dict) -> set[str]:
+    terms = set()
+
+    for item in web_detection.get("bestGuessLabels") or []:
+        terms.update(_tokenize(item.get("label")))
+
+    for item in web_detection.get("webEntities") or []:
+        score = float(item.get("score") or 0.0)
+        if score < 0.5:
+            continue
+        terms.update(_tokenize(item.get("description")))
+
+    return terms
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _is_low_signal_url(url: str) -> bool:
+    parsed = urlparse(url)
+    path = (parsed.path or "").lower()
+
+    if any(path.endswith(ext) for ext in IMAGE_EXTENSIONS):
+        return True
+    return any(hint in path for hint in LOW_SIGNAL_PATH_HINTS)
+
+
+def _root_domain(url: str | None) -> str | None:
+    if not url:
+        return None
+    host = (urlparse(url).netloc or "").lower()
+    if not host:
+        return None
+    if host.startswith("www."):
+        host = host[4:]
+    parts = [part for part in host.split(".") if part]
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return host
+
+
+def _source_affinity_bonus(candidate_url: str, source_root: str | None) -> int:
+    if not source_root:
+        return 0
+    candidate_root = _root_domain(candidate_url)
+    if not candidate_root:
+        return 0
+    if candidate_root == source_root:
+        return 16
+    return -8
+
+
+def _candidate_score(candidate: dict[str, object], terms: set[str]) -> int:
+    match_type = str(candidate.get("match_type") or "")
+    base = {
+        "page_match": 120,
+        "full_match": 90,
+        "partial_match": 70,
+        "similar_match": 45,
+    }.get(match_type, 40)
+
+    title = candidate.get("title")
+    title_text = title if isinstance(title, str) else None
+    url_text = str(candidate.get("url") or "")
+
+    score = base
+    score += min(_as_int(candidate.get("full_match_count")), 5) * 10
+    score += min(_as_int(candidate.get("partial_match_count")), 5) * 5
+
+    overlap = _tokenize(title_text) | _tokenize(url_text)
+    overlap_count = len(overlap & terms)
+    score += min(overlap_count, 6) * 12
+
+    if overlap_count == 0:
+        score -= 18
+
+    if title_text:
+        score += 4
+    if _is_low_signal_url(url_text):
+        score -= 18
+
+    return score
+
+
 def _vision_web_detection(image_bytes: bytes, api_key: str) -> dict:
     endpoint = "https://vision.googleapis.com/v1/images:annotate"
     body = {
@@ -154,11 +306,12 @@ def _vision_web_detection(image_bytes: bytes, api_key: str) -> dict:
     return response_payload.get("webDetection", {})
 
 
-def _extract_source_and_urls(web_detection: dict) -> tuple[str | None, list[str]]:
+def _extract_source_and_matches(web_detection: dict) -> tuple[str | None, list[dict], list[str]]:
     pages = web_detection.get("pagesWithMatchingImages") or []
     full_images = web_detection.get("fullMatchingImages") or []
     partial_images = web_detection.get("partialMatchingImages") or []
     similar_images = web_detection.get("visuallySimilarImages") or []
+    terms = _query_terms(web_detection)
 
     def first_valid_url(items: list[dict]) -> str | None:
         for item in items:
@@ -167,50 +320,108 @@ def _extract_source_and_urls(web_detection: dict) -> tuple[str | None, list[str]
                 return normalized
         return None
 
-    source_url = (
-        first_valid_url(pages)
-        or first_valid_url(full_images)
-        or first_valid_url(partial_images)
-        or first_valid_url(similar_images)
-    )
+    page_candidates: list[dict] = []
+    for page in pages:
+        normalized = _canonicalize_url(page.get("url"))
+        if not normalized:
+            continue
+
+        title = " ".join(str(page.get("pageTitle") or "").split())
+        full_count = len(page.get("fullMatchingImages") or [])
+        partial_count = len(page.get("partialMatchingImages") or [])
+
+        candidate = {
+            "url": normalized,
+            "match_type": "page_match",
+            "title": title[:160] if title else None,
+            "full_match_count": full_count,
+            "partial_match_count": partial_count,
+        }
+        page_candidates.append(candidate)
+
+    other_candidates: list[dict] = []
+
+    def add_other(items: list[dict], match_type: str):
+        for item in items:
+            normalized = _canonicalize_url(item.get("url"))
+            if not normalized:
+                continue
+            other_candidates.append(
+                {
+                    "url": normalized,
+                    "match_type": match_type,
+                    "title": None,
+                    "full_match_count": 0,
+                    "partial_match_count": 0,
+                }
+            )
+
+    add_other(full_images, "full_match")
+    add_other(partial_images, "partial_match")
+    add_other(similar_images, "similar_match")
+
+    source_url = None
+    if page_candidates:
+        source_url = max(page_candidates, key=lambda c: _candidate_score(c, terms)).get("url")
+    else:
+        source_url = (
+            first_valid_url(full_images)
+            or first_valid_url(partial_images)
+            or first_valid_url(similar_images)
+        )
 
     seen = set()
-    urls = []
+    source_root = _root_domain(source_url)
 
-    def add_url(candidate: str | None):
-        normalized = _canonicalize_url(candidate)
-        if not normalized:
-            return
-        if normalized == source_url or normalized in seen:
-            return
-        seen.add(normalized)
-        urls.append(normalized)
+    ranked: list[dict] = []
+    for candidate in page_candidates + other_candidates:
+        url = candidate["url"]
+        if url == source_url or url in seen:
+            continue
+        seen.add(url)
 
-    for page in pages:
-        add_url(page.get("url"))
+        candidate["evidence_score"] = _candidate_score(candidate, terms) + _source_affinity_bonus(url, source_root)
+        ranked.append(candidate)
 
-    for image_data in full_images:
-        add_url(image_data.get("url"))
+    ranked.sort(
+        key=lambda c: (
+            int(c.get("evidence_score") or 0),
+            int(c.get("full_match_count") or 0),
+            int(c.get("partial_match_count") or 0),
+            1 if c.get("title") else 0,
+        ),
+        reverse=True,
+    )
 
-    for image_data in partial_images:
-        add_url(image_data.get("url"))
-
-    for image_data in similar_images:
-        add_url(image_data.get("url"))
-
-    return source_url, urls
+    ranked_terms = sorted(terms)[:12]
+    return source_url, ranked, ranked_terms
 
 
-def _normalize_graph(web_detection: dict, max_nodes: int) -> dict:
-    source_url, urls = _extract_source_and_urls(web_detection)
-    urls = urls[:max_nodes]
+def _normalize_graph(
+    web_detection: dict,
+    max_nodes: int,
+    *,
+    strict_filter: bool,
+    min_evidence_score: int,
+) -> dict:
+    source_url, matches, query_terms = _extract_source_and_matches(web_detection)
+    total_candidates = len(matches)
 
-    source_date = date.today() - timedelta(days=len(urls) + 2)
+    if strict_filter:
+        matches = [
+            match
+            for match in matches
+            if _as_int(match.get("evidence_score")) >= min_evidence_score
+        ]
+
+    filtered_out_count = total_candidates - len(matches)
+    matches = matches[:max_nodes]
+
     source = {
         "id": "src",
-        "label": _label_from_url(source_url) if source_url else "unknown source",
-        "platform": _platform_from_url(source_url) if source_url else "news",
-        "date": source_date.isoformat(),
+        "label": _label_from_url(source_url) if source_url else "uploaded image",
+        "platform": _platform_from_url(source_url) if source_url else "upload",
+        "date": None,
         "url": source_url,
     }
 
@@ -218,24 +429,25 @@ def _normalize_graph(web_detection: dict, max_nodes: int) -> dict:
     edges = []
     platforms = set()
 
-    for idx, url in enumerate(urls, start=1):
+    for idx, match in enumerate(matches, start=1):
+        url = match["url"]
         node_id = f"n{idx}"
         platform = _platform_from_url(url)
         platforms.add(platform)
         nodes.append(
             {
                 "id": node_id,
-                "label": _label_from_url(url),
+                "label": match.get("title") or _label_from_url(url),
                 "platform": platform,
-                "date": (source_date + timedelta(days=idx)).isoformat(),
+                "date": None,
                 "url": url,
+                "match_type": match.get("match_type"),
+                "evidence_score": int(match.get("evidence_score") or 0),
+                "full_match_count": int(match.get("full_match_count") or 0),
+                "partial_match_count": int(match.get("partial_match_count") or 0),
             }
         )
-
-        if idx <= 2:
-            edges.append({"from": "src", "to": node_id})
-        else:
-            edges.append({"from": f"n{idx - 1}", "to": node_id})
+        edges.append({"from": "src", "to": node_id})
 
     return {
         "source": source,
@@ -245,6 +457,12 @@ def _normalize_graph(web_detection: dict, max_nodes: int) -> dict:
             "total_matches": len(nodes),
             "platforms": sorted(platforms),
             "mode": "live",
+            "source_url_found": source_url is not None,
+            "query_terms": query_terms,
+            "strict_filter": strict_filter,
+            "min_evidence_score": min_evidence_score,
+            "filtered_out_count": filtered_out_count,
+            "candidate_count": total_candidates,
         },
     }
 
@@ -277,88 +495,60 @@ def _fallback_reason_for_error(exc: VisionAPIError) -> str:
     return "vision_api_error"
 
 
-def _http_detail_for_error(exc: VisionAPIError) -> str:
+def _http_detail_for_error(exc: VisionAPIError) -> dict:
     message = _sanitize_error_message(exc.message)
     if exc.status:
-        return f"Vision API error ({exc.status}): {message}"
-    return f"Vision API error: {message}"
+        pretty = f"Vision API error ({exc.status}): {message}"
+    else:
+        pretty = f"Vision API error: {message}"
 
-
-def _mock_graph(filename: str | None, max_nodes: int, reason: str) -> dict:
-    seed_label = Path(filename).stem if filename else "uploaded-image"
-    count = max(3, min(max_nodes, 6))
-
-    source_date = date.today() - timedelta(days=count + 2)
-    source = {
-        "id": "src",
-        "label": f"origin/{seed_label}",
-        "platform": "4chan",
-        "date": source_date.isoformat(),
-        "url": None,
-    }
-
-    mock_platforms = ["reddit", "twitter", "facebook", "news", "instagram", "imgur"]
-    nodes = []
-    edges = []
-
-    for idx in range(1, count + 1):
-        platform = mock_platforms[(idx - 1) % len(mock_platforms)]
-        node_id = f"n{idx}"
-        nodes.append(
-            {
-                "id": node_id,
-                "label": f"{platform}/post-{idx}",
-                "platform": platform,
-                "date": (source_date + timedelta(days=idx)).isoformat(),
-                "url": f"https://example.com/{platform}/post-{idx}",
-            }
-        )
-
-        if idx <= 2:
-            edges.append({"from": "src", "to": node_id})
-        else:
-            edges.append({"from": f"n{idx - 1}", "to": node_id})
-
-    platforms = sorted({node["platform"] for node in nodes})
-    return {
-        "source": source,
-        "nodes": nodes,
-        "edges": edges,
-        "summary": {
-            "total_matches": len(nodes),
-            "platforms": platforms,
-            "mode": "fallback",
-            "fallback": True,
-            "reason": reason,
-        },
-    }
+    return _error_detail(
+        pretty,
+        code=_fallback_reason_for_error(exc),
+        vision_status=exc.status,
+        vision_code=exc.code,
+    )
 
 
 @router.post("/spread")
 async def spread_from_image(
     file: UploadFile = File(...),
     max_nodes: int = Query(8, ge=1, le=20),
-    use_mock_fallback: bool = Query(True),
+    strict_filter: bool = Query(True),
+    min_evidence_score: int = Query(130, ge=0, le=400),
 ):
     if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail("File must be an image", code="invalid_image_upload"),
+        )
 
     image_bytes = await file.read()
     await file.close()
 
     if not image_bytes:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail("Uploaded file is empty", code="empty_upload"),
+        )
 
     api_key = os.getenv("GOOGLE_CLOUD_VISION_KEY", "").strip()
     if not api_key:
-        if use_mock_fallback:
-            return _mock_graph(file.filename, max_nodes, "missing_google_vision_key")
-        raise HTTPException(status_code=500, detail="Google Vision API key is missing")
+        raise HTTPException(
+            status_code=500,
+            detail=_error_detail(
+                "Google Vision API key is missing",
+                code="missing_google_vision_key",
+            ),
+        )
 
     try:
         web_detection = _vision_web_detection(image_bytes, api_key)
-        return _normalize_graph(web_detection, max_nodes)
+        return _normalize_graph(
+            web_detection,
+            max_nodes,
+            strict_filter=strict_filter,
+            min_evidence_score=min_evidence_score,
+        )
     except VisionAPIError as exc:
-        if use_mock_fallback:
-            return _mock_graph(file.filename, max_nodes, _fallback_reason_for_error(exc))
         raise HTTPException(status_code=502, detail=_http_detail_for_error(exc)) from exc

@@ -5,7 +5,7 @@ import PinnedPhoto from './PinnedPhoto'
  * CorkBoard – the investigation board view.
  *
  * Props:
- *   spreadData    – { source, nodes, edges, summary } (the contract from mockSpread.js)
+ *   spreadData    – { source, nodes, edges, summary } (the backend /spread contract)
  *   uploadedImage – data URL or blob URL of the user's uploaded image
  *   onBack        – callback to return to upload view
  */
@@ -191,6 +191,11 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
   if (!spreadData) return null
 
   const { source } = spreadData
+  const summary = spreadData.summary || {}
+  const totalMatches = Number(summary.total_matches || 0)
+  const mode = String(summary.mode || 'live').toLowerCase()
+  const modeLabel = mode === 'live' ? 'Live Data' : 'Unknown Mode'
+  const statusText = `${modeLabel} · ${totalMatches} match${totalMatches === 1 ? '' : 'es'}`
   const uploadedNode = {
     id: '__uploaded__',
     label: 'Your Upload',
@@ -243,6 +248,10 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
       onMouseUp={onMouseUp}
       onMouseLeave={onMouseUp}
     >
+      <div className={`spread-status ${mode === 'live' ? 'spread-status-live' : ''}`}>
+        {statusText}
+      </div>
+
       <button className="back-button" onClick={onBack}>
         New Investigation
       </button>
@@ -333,7 +342,8 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
 
             <p><strong>Label:</strong> {selectedNode.label}</p>
             <p><strong>Platform:</strong> {selectedNode.platform}</p>
-            <p><strong>Date:</strong> {selectedNode.date}</p>
+            <p><strong>Date:</strong> {selectedNode.date || 'Unknown time'}</p>
+            <p><strong>Match type:</strong> {selectedNode.match_type || (selectedNode.id === source.id ? 'source' : 'n/a')}</p>
 
             {selectedNode.url ? (
               <a
