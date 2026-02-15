@@ -7,8 +7,8 @@
 }
 
 :root {
-  --ink-950: #080706;
-  --ink-900: #11100f;
+  --ink-950: #a7927d; /*background color*/
+  --ink-900: #11100f; /*file input button color*/
   --ink-850: #1a1715;
   --paper-200: #d6cdbf;
   --paper-300: #b7ad9f;
