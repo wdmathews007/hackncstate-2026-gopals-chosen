@@ -1,7 +1,119 @@
-from PIL import Image
-from PIL.ExifTags import TAGS, GPSTAGS
-from iptcinfo3 import IPTCInfo
+import logging
+import re
 from datetime import datetime
+
+from iptcinfo3 import IPTCInfo
+from PIL.ExifTags import GPSTAGS, TAGS
+
+
+logger = logging.getLogger(__name__)
+
+SUSPICIOUS_SOFTWARE = (
+    "photoshop",
+    "lightroom",
+    "midjourney",
+    "dalle",
+    "stable diffusion",
+    "stablediffusion",
+)
+
+SUSPICIOUS_KEYWORD_PHRASES = (
+    "midjourney",
+    "dalle",
+    "photoshop",
+    "stable diffusion",
+    "stablediffusion",
+    "ai generated",
+)
+
+
+def _to_text(value):
+    if value is None:
+        return None
+
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="ignore").strip()
+        return text or None
+
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+
+    try:
+        text = str(value).strip()
+    except Exception:
+        return None
+
+    return text or None
+
+
+def _to_json_scalar(value):
+    if value is None:
+        return None
+    if isinstance(value, (bool, int, float, str)):
+        return value
+    text = _to_text(value)
+    return text
+
+
+def _to_float(value):
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        num = _to_float(value[0])
+        den = _to_float(value[1])
+        if num is None or den in (None, 0.0):
+            return None
+        return num / den
+
+    numerator = getattr(value, "numerator", None)
+    denominator = getattr(value, "denominator", None)
+    if numerator is not None and denominator is not None:
+        den = _to_float(denominator)
+        num = _to_float(numerator)
+        if den in (None, 0.0) or num is None:
+            return None
+        return num / den
+
+    try:
+        text = _to_text(value)
+        if text is None:
+            return None
+        return float(text)
+    except Exception:
+        return None
+
+
+def _normalize_keywords(raw_value):
+    if raw_value is None:
+        return []
+
+    if isinstance(raw_value, (str, bytes)):
+        values = [raw_value]
+    elif isinstance(raw_value, (list, tuple, set)):
+        values = list(raw_value)
+    else:
+        values = [raw_value]
+
+    keywords = []
+    for item in values:
+        text = _to_text(item)
+        if text:
+            keywords.append(text)
+
+    return keywords
+
+
+def _contains_ai_token(keywords):
+    tokens = set()
+    for keyword in keywords:
+        tokens.update(re.findall(r"[a-z0-9]+", keyword.lower()))
+    return "ai" in tokens
+
 
 class ImageMetadata:
     def __init__(self, image):
@@ -9,23 +121,19 @@ class ImageMetadata:
         self.exif = {}
         self.iptc = {}
 
-        # Basic info
         self.width, self.height = image.size
         self.format = image.format
         self.mode = image.mode
 
-        # EXIF Info
         self.camera_type = None
         self.gps_latitude = None
         self.gps_longitude = None
 
-        # IPTC Info
         self._caption = None
         self.keywords = []
         self.author = None
         self.iptc_date_created = None
 
-        # Extract metadata
         self._extract_exif()
         self._extract_iptc()
 
@@ -33,99 +141,101 @@ class ImageMetadata:
         exif_data = self.image.getexif()
         if not exif_data:
             return
-        
+
         gps_info = {}
-        make = model = None
+        make = None
+        model = None
 
         for tag_id, value in exif_data.items():
             tag = TAGS.get(tag_id, tag_id)
             self.exif[tag] = value
-            # Camera info
+
             if tag == "Make":
-                make = value
+                make = _to_text(value)
             elif tag == "Model":
-                model = value
-            # GPS info
-            elif tag == "GPSInfo":
-                for gps_id in value:
+                model = _to_text(value)
+            elif tag == "GPSInfo" and isinstance(value, dict):
+                for gps_id, gps_value in value.items():
                     sub_tag = GPSTAGS.get(gps_id, gps_id)
-                    gps_info[sub_tag] = value[gps_id]
+                    gps_info[sub_tag] = gps_value
 
-        # Combined camera type
-        self.camera_type = f"{make} {model}" if make and model else make or model
+        self.camera_type = f"{make} {model}" if make and model else (make or model)
 
-        # Convert GPS
         if gps_info:
             self.gps_latitude = self._convert_gps(
                 gps_info.get("GPSLatitude"),
-                gps_info.get("GPSLatitudeRef")
+                gps_info.get("GPSLatitudeRef"),
             )
             self.gps_longitude = self._convert_gps(
                 gps_info.get("GPSLongitude"),
-                gps_info.get("GPSLongitudeRef")
+                gps_info.get("GPSLongitudeRef"),
             )
 
-    
     def _convert_gps(self, value, ref):
         if not value:
             return None
 
-        def to_deg(x):
-            return float(x[0]) / float(x[1])
+        if not isinstance(value, (tuple, list)) or len(value) < 3:
+            return None
 
-        d = to_deg(value[0])
-        m = to_deg(value[1])
-        s = to_deg(value[2])
+        d = _to_float(value[0])
+        m = _to_float(value[1])
+        s = _to_float(value[2])
+
+        if d is None or m is None or s is None:
+            return None
 
         decimal = d + (m / 60.0) + (s / 3600.0)
+        ref_text = (_to_text(ref) or "").upper()
 
-        if ref in ["S", "W"]:
+        if ref_text in {"S", "W"}:
             decimal = -decimal
 
-        return decimal
+        return round(decimal, 8)
 
     def _extract_iptc(self):
+        filename = getattr(self.image, "filename", None)
+        if not filename:
+            return
+
         try:
-            if hasattr(self.image, 'filename') and self.image.filename:
-                info = IPTCInfo(self.image.filename)
-            else:
-                return
+            info = IPTCInfo(filename)
+        except Exception as exc:
+            logger.warning("IPTC extraction failed: %s", exc)
+            return
 
-            def iptc_get(field_name):
-                try:
-                    value = info[field_name]
-                    if value in (b"", "", None):
-                        return None
-                    return value
-                except Exception:
-                    return None
+        def iptc_get(field_name):
+            try:
+                value = info[field_name]
+            except Exception:
+                return None
 
-            # Extract IPTC fields
-            self._caption = iptc_get("caption/abstract")
-            self.keywords = iptc_get("keywords") or []
-            if isinstance(self.keywords, str):
-                self.keywords = [self.keywords]
-            self.author = iptc_get("byline")
+            if value in (b"", "", None, []):
+                return None
+            return value
 
-            # IPTC date
-            date_str = iptc_get("date created")
-            time_str = iptc_get("time created")
-            if date_str:
-                try:
-                    if isinstance(date_str, bytes):
-                        date_str = date_str.decode(errors="ignore")
-                    if isinstance(time_str, bytes):
-                        time_str = time_str.decode(errors="ignore")
-                    dt = datetime.strptime(date_str, "%Y%m%d")
-                    if time_str:
-                        dt = datetime.combine(dt.date(), datetime.strptime(time_str, "%H%M%S").time())
-                    self.iptc_date_created = dt
-                except:
-                    self.iptc_date_created = None
+        self._caption = _to_text(iptc_get("caption/abstract"))
+        self.keywords = _normalize_keywords(iptc_get("keywords"))
+        self.author = _to_text(iptc_get("byline"))
 
-        except Exception as e:
-            print(f"IPTC extraction failed: {e}")
+        date_str = _to_text(iptc_get("date created"))
+        time_str = _to_text(iptc_get("time created"))
 
+        if not date_str:
+            return
+
+        try:
+            dt = datetime.strptime(date_str, "%Y%m%d")
+
+            if time_str:
+                digits = "".join(ch for ch in time_str if ch.isdigit())
+                if len(digits) >= 6:
+                    tm = datetime.strptime(digits[:6], "%H%M%S").time()
+                    dt = datetime.combine(dt.date(), tm)
+
+            self.iptc_date_created = dt
+        except Exception:
+            self.iptc_date_created = None
 
     @property
     def caption(self):
@@ -133,73 +243,68 @@ class ImageMetadata:
 
     @property
     def shutter_speed(self):
-        val = self.exif.get("ExposureTime")
-        if isinstance(val, tuple) and len(val) == 2:
-            return val[0] / val[1]
-        return val
+        value = self.exif.get("ExposureTime")
+        parsed = _to_float(value)
+        return parsed if parsed is not None else _to_json_scalar(value)
 
     @property
     def aperture(self):
-        val = self.exif.get("FNumber")
-        if isinstance(val, tuple) and len(val) == 2:
-            return val[0] / val[1]
-        return val
+        value = self.exif.get("FNumber")
+        parsed = _to_float(value)
+        return parsed if parsed is not None else _to_json_scalar(value)
 
     @property
     def iso(self):
-        return self.exif.get("ISOSpeedRatings")
+        return _to_json_scalar(self.exif.get("ISOSpeedRatings"))
 
     @property
     def focal_length(self):
-        val = self.exif.get("FocalLength")
-        if isinstance(val, tuple) and len(val) == 2:
-            return val[0] / val[1]
-        return val
+        value = self.exif.get("FocalLength")
+        parsed = _to_float(value)
+        return parsed if parsed is not None else _to_json_scalar(value)
 
     @property
     def flash(self):
-        return self.exif.get("Flash")
+        return _to_json_scalar(self.exif.get("Flash"))
 
     @property
     def capture_time(self):
-        dt = self.exif.get("DateTimeOriginal")
-        if dt:
-            try:
-                return datetime.strptime(dt, "%Y:%m:%d %H:%M:%S")
-            except:
-                return dt
-        return None
-    
+        raw_value = _to_text(self.exif.get("DateTimeOriginal"))
+        if not raw_value:
+            return None
+
+        try:
+            return datetime.strptime(raw_value, "%Y:%m:%d %H:%M:%S")
+        except Exception:
+            return raw_value
+
     @property
     def software(self):
-        val = self.exif.get("Software")
-        if val:
-            return str(val)  # ensure it’s a string
-        return None
-    
+        return _to_text(self.exif.get("Software"))
+
     @property
     def is_likely_edited(self):
         if self.gps_longitude is not None and self.gps_latitude is not None:
             return "Likely Real"
-        
-        # Check software for editing or AI tools
-        suspicious_software = ["photoshop", "lightroom", "midjourney", "dalle", "stable diffusion"]
-        if self.software and any(word in self.software.lower() for word in suspicious_software):
+
+        software_text = (self.software or "").lower()
+        if software_text and any(term in software_text for term in SUSPICIOUS_SOFTWARE):
             return "Likely Edited"
 
-        # Check IPTC keywords
-        if self.keywords:
-            lower_keywords = [k.lower() for k in self.keywords if isinstance(k, str)]
-            if any(word in lower_keywords for word in ["ai", "midjourney", "dalle", "photoshop"]):
-                return "Likely Edited"
+        keyword_blob = " ".join(self.keywords).lower()
+        if keyword_blob and any(term in keyword_blob for term in SUSPICIOUS_KEYWORD_PHRASES):
+            return "Likely Edited"
+        if _contains_ai_token(self.keywords):
+            return "Likely Edited"
 
         return "Unknown"
 
-
     def to_dict(self):
+        capture_time = self.capture_time
+
         return {
             "camera_type": self.camera_type,
-            "capture_time": str(self.capture_time) if self.capture_time else None,
+            "capture_time": str(capture_time) if capture_time else None,
             "gps_latitude": self.gps_latitude,
             "gps_longitude": self.gps_longitude,
             "shutter_speed": self.shutter_speed,
@@ -212,5 +317,5 @@ class ImageMetadata:
             "author": self.author,
             "software": self.software,
             "iptc_date_created": str(self.iptc_date_created) if self.iptc_date_created else None,
-            "likely_edited": self.is_likely_edited
+            "likely_edited": self.is_likely_edited,
         }

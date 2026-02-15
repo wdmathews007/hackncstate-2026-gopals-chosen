@@ -21,8 +21,10 @@ function PinnedPhoto({
   animDelay,
   onSelect,
   isActive,
+  isDimmed,
 }) {
   const [visible, setVisible] = useState(false)
+  const [thumbnailFailed, setThumbnailFailed] = useState(false)
   const [faviconFailed, setFaviconFailed] = useState(false)
 
   useEffect(() => {
@@ -30,17 +32,25 @@ function PinnedPhoto({
     return () => clearTimeout(timer)
   }, [animDelay])
 
+  useEffect(() => {
+    setThumbnailFailed(false)
+    setFaviconFailed(false)
+  }, [node?.url])
+
   const icon = PLATFORM_ICONS[node.platform] || "?"
 
   let nodeHost = null
+  let thumbnailUrl = null
   let faviconUrl = null
   if (node?.url) {
     try {
       const parsed = new URL(node.url)
       nodeHost = parsed.hostname.replace(/^www\./, '')
+      thumbnailUrl = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(node.url)}?w=600`
       faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(nodeHost)}&sz=128`
     } catch {
       nodeHost = null
+      thumbnailUrl = null
       faviconUrl = null
     }
   }
@@ -51,6 +61,7 @@ function PinnedPhoto({
     isUploaded ? "pinned-uploaded" : "",
     onSelect ? "pinned-selectable" : "",
     isActive ? "pinned-active" : "",
+    isDimmed ? "pinned-dim" : "",
     visible ? "pinned-visible" : "",
   ].filter(Boolean).join(" ")
 
@@ -75,8 +86,21 @@ function PinnedPhoto({
       <div className="polaroid">
         {isUploaded && uploadedImage ? (
           <img className="polaroid-image" src={uploadedImage} alt="Uploaded" />
+        ) : thumbnailUrl && !thumbnailFailed ? (
+          <div className="polaroid-placeholder node-preview node-preview-screenshot">
+            <img
+              className="node-thumbnail"
+              src={thumbnailUrl}
+              alt=""
+              aria-hidden="true"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={() => setThumbnailFailed(true)}
+            />
+            <span className="node-preview-domain">{nodeHost}</span>
+          </div>
         ) : faviconUrl && !faviconFailed ? (
-          <div className="polaroid-placeholder node-preview">
+          <div className="polaroid-placeholder node-preview node-preview-favicon">
             <img
               className="node-favicon"
               src={faviconUrl}

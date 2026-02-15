@@ -139,7 +139,7 @@ function usePanZoom() {
 
   const onMouseDown = useCallback((e) => {
     // Only pan on middle-click or left-click on the board background
-    if (e.target.closest('.pinned-photo, .back-button, .node-drawer')) return
+    if (e.target.closest('.pinned-photo, .back-button, .node-popup')) return
     isPanning.current = true
     lastPos.current = { x: e.clientX, y: e.clientY }
   }, [])
@@ -208,6 +208,28 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
     ? uploadedNode
     : allNodeMap?.[selectedNodeId] || null
 
+  const popupLayout = useMemo(() => {
+    if (!selectedNodeId) return null
+    const anchor = positions[selectedNodeId]
+    if (!anchor) return null
+
+    const popupWidth = 320
+    const popupHeight = 240
+    const gap = 18
+
+    let left = anchor.x + NODE_W + gap
+    let side = 'right'
+
+    if (left + popupWidth > BOARD_W - 16) {
+      left = anchor.x - popupWidth - gap
+      side = 'left'
+    }
+
+    const top = Math.max(12, Math.min(BOARD_H - popupHeight - 12, anchor.y))
+
+    return { left, top, side }
+  }, [selectedNodeId, positions])
+
   function handleSelectNode(node) {
     setSelectedNodeId(node.id)
   }
@@ -217,6 +239,58 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
     { from: "__uploaded__", to: source.id },
     ...visibleEdges,
   ]
+
+  const edgeByTo = useMemo(() => {
+    const byTo = new Map()
+    for (const edge of allEdges) {
+      if (edge?.to) byTo.set(edge.to, edge)
+    }
+    return byTo
+  }, [allEdges])
+
+  const lineageNodeIds = useMemo(() => {
+    const ids = new Set()
+    if (!selectedNodeId) return ids
+
+    let cursor = selectedNodeId
+    const seen = new Set()
+
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor)
+      ids.add(cursor)
+      const parentEdge = edgeByTo.get(cursor)
+      if (!parentEdge?.from) break
+      cursor = parentEdge.from
+    }
+
+    return ids
+  }, [selectedNodeId, edgeByTo])
+
+  const lineageEdgeKeys = useMemo(() => {
+    const keys = new Set()
+    if (!selectedNodeId) return keys
+
+    let cursor = selectedNodeId
+    const seen = new Set()
+
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor)
+      const edge = edgeByTo.get(cursor)
+      if (!edge?.from || !edge?.to) break
+      keys.add(`${edge.from}-${edge.to}`)
+      cursor = edge.from
+    }
+
+    return keys
+  }, [selectedNodeId, edgeByTo])
+
+  const selectedIncomingEdge = selectedNodeId ? edgeByTo.get(selectedNodeId) || null : null
+  const selectedParentId = selectedIncomingEdge?.from || null
+  const selectedParentLabel = selectedParentId === 'src'
+    ? source.label
+    : selectedParentId === '__uploaded__'
+      ? uploadedNode.label
+      : (selectedParentId ? allNodeMap?.[selectedParentId]?.label || selectedParentId : null)
 
   // Animation timing: yarn appears first, then nodes fade in by depth
   const BASE_DELAY = 400 // ms before first element appears
@@ -269,20 +343,26 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
             const to = positions[edge.to]
             if (!from || !to) return null
 
+            const edgeKey = `${edge.from}-${edge.to}`
+            const isActiveEdge = selectedNodeId ? lineageEdgeKeys.has(edgeKey) : false
+            const isDimEdge = Boolean(selectedNodeId) && !isActiveEdge
+            const affinity = Number(edge.affinity || 0)
+
             const totalLen = Math.sqrt(
               (to.cx - from.cx) ** 2 + (to.cy - from.cy) ** 2
             )
 
             return (
               <path
-                key={`${edge.from}-${edge.to}`}
-                className="yarn-line"
+                key={edgeKey}
+                className={`yarn-line ${isActiveEdge ? 'yarn-line-active' : ''} ${isDimEdge ? 'yarn-line-faded' : ''}`}
                 d={yarnPath(from.cx, from.cy, to.cx, to.cy, i)}
                 style={{
                   strokeDasharray: totalLen,
                   strokeDashoffset: totalLen,
                   animationDelay: `${BASE_DELAY + i * 200}ms`,
                   animationDuration: `${YARN_DURATION}ms`,
+                  strokeWidth: isActiveEdge ? Math.min(6, 3 + affinity / 18) : 3,
                 }}
               />
             )
@@ -296,6 +376,7 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
             isUploaded
             uploadedImage={uploadedImage}
             isActive={selectedNodeId === '__uploaded__'}
+            isDimmed={Boolean(selectedNodeId) && !lineageNodeIds.has('__uploaded__')}
             onSelect={handleSelectNode}
             style={{
               position: 'absolute',
@@ -316,6 +397,7 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
               node={node}
               isSource={node.id === source.id}
               isActive={selectedNodeId === node.id}
+              isDimmed={Boolean(selectedNodeId) && !lineageNodeIds.has(node.id)}
               onSelect={handleSelectNode}
               style={{
                 position: 'absolute',
@@ -327,12 +409,16 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
           )
         })}
 
-        {selectedNode && (
-          <aside className="node-drawer" aria-live="polite">
-            <div className="node-drawer-header">
-              <h2 className="node-drawer-title">Node Details</h2>
+        {selectedNode && popupLayout && (
+          <aside
+            className={`node-popup node-popup-${popupLayout.side}`}
+            style={{ left: popupLayout.left, top: popupLayout.top }}
+            aria-live="polite"
+          >
+            <div className="node-popup-header">
+              <h2 className="node-popup-title">Node Details</h2>
               <button
-                className="node-drawer-close"
+                className="node-popup-close"
                 onClick={() => setSelectedNodeId(null)}
                 aria-label="Close node details"
               >
@@ -344,10 +430,16 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
             <p><strong>Platform:</strong> {selectedNode.platform}</p>
             <p><strong>Date:</strong> {selectedNode.date || 'Unknown time'}</p>
             <p><strong>Match type:</strong> {selectedNode.match_type || (selectedNode.id === source.id ? 'source' : 'n/a')}</p>
+            {selectedParentLabel && (
+              <p><strong>Path parent:</strong> {selectedParentLabel}</p>
+            )}
+            {selectedIncomingEdge?.inferred && selectedNode.id !== '__uploaded__' && (
+              <p><strong>Path confidence:</strong> {selectedIncomingEdge.affinity ?? 0}</p>
+            )}
 
             {selectedNode.url ? (
               <a
-                className="node-drawer-link"
+                className="node-popup-link"
                 href={selectedNode.url}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -355,7 +447,7 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
                 Open Source
               </a>
             ) : (
-              <p className="node-drawer-muted">No public URL</p>
+              <p className="node-popup-muted">No public URL</p>
             )}
           </aside>
         )}

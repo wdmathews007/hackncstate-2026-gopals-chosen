@@ -9,6 +9,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 const FORCE_FAKE_VERDICT = import.meta.env.VITE_FORCE_FAKE_VERDICT === 'true'
 const SPREAD_STRICT_FILTER = import.meta.env.VITE_SPREAD_STRICT_FILTER !== 'false'
 const SPREAD_MIN_EVIDENCE_SCORE = Number.parseInt(import.meta.env.VITE_SPREAD_MIN_EVIDENCE_SCORE || '130', 10) || 130
+const SPREAD_MAX_PER_DOMAIN = Number.parseInt(import.meta.env.VITE_SPREAD_MAX_PER_DOMAIN || '2', 10) || 2
 
 function deriveVerdict(uploadResult) {
   const classifierLabel = String(uploadResult?.analysis?.label || '').toLowerCase()
@@ -118,6 +119,7 @@ function App() {
       const spreadParams = new URLSearchParams({
         strict_filter: String(SPREAD_STRICT_FILTER),
         min_evidence_score: String(SPREAD_MIN_EVIDENCE_SCORE),
+        max_per_domain: String(SPREAD_MAX_PER_DOMAIN),
       })
 
       const response = await fetch(`${API_BASE_URL}/spread?${spreadParams.toString()}`, {
@@ -164,8 +166,7 @@ function App() {
 
   if (phase === 'investigate' && spreadData) {
     return (
-      <div className="container corkboard-container">
-        <Header />
+      <div className="container corkboard-fullscreen">
         <CorkBoard
           spreadData={spreadData}
           uploadedImage={image}

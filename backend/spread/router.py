@@ -224,6 +224,98 @@ def _source_affinity_bonus(candidate_url: str, source_root: str | None) -> int:
     return -8
 
 
+def _node_tokens(node: dict[str, object]) -> set[str]:
+    label = node.get("label")
+    label_text = label if isinstance(label, str) else None
+    url_text = str(node.get("url") or "")
+    return _tokenize(label_text) | _tokenize(url_text)
+
+
+def _edge_affinity(parent: dict[str, object], child: dict[str, object]) -> int:
+    parent_url = str(parent.get("url") or "")
+    child_url = str(child.get("url") or "")
+
+    affinity = 0
+    parent_root = _root_domain(parent_url)
+    child_root = _root_domain(child_url)
+    if parent_root and child_root and parent_root == child_root:
+        affinity += 26
+
+    if parent.get("platform") == child.get("platform"):
+        affinity += 8
+
+    overlap = len(_node_tokens(parent) & _node_tokens(child))
+    affinity += min(overlap, 8) * 5
+
+    parent_score = _as_int(parent.get("evidence_score"))
+    child_score = _as_int(child.get("evidence_score"))
+    gap = max(0, parent_score - child_score)
+    if gap <= 12:
+        affinity += 8
+    elif gap <= 24:
+        affinity += 4
+
+    return affinity
+
+
+def _build_path_edges(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not nodes:
+        return []
+
+    sorted_nodes = sorted(nodes, key=lambda node: _as_int(node.get("evidence_score")), reverse=True)
+    ordered = [dict(node) for node in sorted_nodes]
+
+    edges: list[dict[str, object]] = []
+    attached: list[dict[str, object]] = []
+
+    for node in ordered:
+        node_id = str(node.get("id"))
+        best_parent_id = "src"
+        best_affinity = 0
+
+        for parent in attached:
+            affinity = _edge_affinity(parent, node)
+            if affinity > best_affinity:
+                best_affinity = affinity
+                best_parent_id = str(parent.get("id"))
+
+        if best_affinity < 20:
+            best_parent_id = "src"
+
+        edges.append(
+            {
+                "from": best_parent_id,
+                "to": node_id,
+                "inferred": True,
+                "affinity": best_affinity,
+            }
+        )
+        attached.append(node)
+
+    return edges
+
+
+def _apply_domain_cap(matches: list[dict], max_per_domain: int) -> tuple[list[dict], int]:
+    if max_per_domain < 1:
+        return matches, 0
+
+    kept = []
+    dropped = 0
+    counts: dict[str, int] = {}
+
+    for match in matches:
+        root = _root_domain(match.get("url")) or str(match.get("url") or "")
+        seen = counts.get(root, 0)
+        if seen >= max_per_domain:
+            dropped += 1
+            continue
+
+        counts[root] = seen + 1
+        kept.append(match)
+
+    return kept, dropped
+
+
 def _candidate_score(candidate: dict[str, object], terms: set[str]) -> int:
     match_type = str(candidate.get("match_type") or "")
     base = {
@@ -403,6 +495,7 @@ def _normalize_graph(
     *,
     strict_filter: bool,
     min_evidence_score: int,
+    max_per_domain: int,
 ) -> dict:
     source_url, matches, query_terms = _extract_source_and_matches(web_detection)
     total_candidates = len(matches)
@@ -414,7 +507,10 @@ def _normalize_graph(
             if _as_int(match.get("evidence_score")) >= min_evidence_score
         ]
 
-    filtered_out_count = total_candidates - len(matches)
+    strict_filtered_out_count = total_candidates - len(matches)
+
+    matches, domain_capped_out_count = _apply_domain_cap(matches, max_per_domain)
+    filtered_out_count = strict_filtered_out_count + domain_capped_out_count
     matches = matches[:max_nodes]
 
     source = {
@@ -426,7 +522,6 @@ def _normalize_graph(
     }
 
     nodes = []
-    edges = []
     platforms = set()
 
     for idx, match in enumerate(matches, start=1):
@@ -447,7 +542,8 @@ def _normalize_graph(
                 "partial_match_count": int(match.get("partial_match_count") or 0),
             }
         )
-        edges.append({"from": "src", "to": node_id})
+
+    edges = _build_path_edges(nodes)
 
     return {
         "source": source,
@@ -462,7 +558,11 @@ def _normalize_graph(
             "strict_filter": strict_filter,
             "min_evidence_score": min_evidence_score,
             "filtered_out_count": filtered_out_count,
+            "strict_filtered_out_count": strict_filtered_out_count,
+            "domain_capped_out_count": domain_capped_out_count,
+            "max_per_domain": max_per_domain,
             "candidate_count": total_candidates,
+            "edge_mode": "inferred_path",
         },
     }
 
@@ -516,6 +616,7 @@ async def spread_from_image(
     max_nodes: int = Query(8, ge=1, le=20),
     strict_filter: bool = Query(True),
     min_evidence_score: int = Query(130, ge=0, le=400),
+    max_per_domain: int = Query(2, ge=1, le=6),
 ):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -549,6 +650,7 @@ async def spread_from_image(
             max_nodes,
             strict_filter=strict_filter,
             min_evidence_score=min_evidence_score,
+            max_per_domain=max_per_domain,
         )
     except VisionAPIError as exc:
         raise HTTPException(status_code=502, detail=_http_detail_for_error(exc)) from exc
