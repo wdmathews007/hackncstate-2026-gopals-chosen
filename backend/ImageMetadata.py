@@ -180,3 +180,22 @@ class ImageMetadata:
             if any(word in lower_keywords for word in ["ai", "midjourney", "dalle", "photoshop"]):
                 return "Likely Edited"
 
+
+    def to_dict(self):
+        return {
+            "camera_type": self.camera_type,
+            "capture_time": str(self.capture_time) if self.capture_time else None,
+            "gps_latitude": self.gps_latitude,
+            "gps_longitude": self.gps_longitude,
+            "shutter_speed": self.shutter_speed,
+            "aperture": self.aperture,
+            "iso": self.iso,
+            "focal_length": self.focal_length,
+            "flash": self.flash,
+            "caption": self.caption,
+            "keywords": self.keywords,
+            "author": self.author,
+            "software": self.software,
+            "iptc_date_created": str(self.iptc_date_created) if self.iptc_date_created else None,
+            "likely_edited": self.is_likely_edited
+        }
