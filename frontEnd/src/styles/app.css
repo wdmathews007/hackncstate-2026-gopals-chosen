@@ -36,8 +36,9 @@ body {
   padding: 2rem 1rem;
   background-color: var(--ink-950);
   background-image:
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.016) 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 6px);
+    /* repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.016) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 6px); */
+    url("../image/wallduck.png");
 }
 
 .page-header {
