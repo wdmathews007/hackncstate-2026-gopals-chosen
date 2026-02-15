@@ -57,22 +57,56 @@ const styles = {
   }
 }
 
-function loadImage(event)
-{
-  event.target.files[0]
-}
-
 function App() {
   const [image, setImage] = useState(null)
+  const [file, setFile] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+
+  async function handleCheck() {
+    if (!file) return
+    setLoading(true)
+    setError(null)
+    setResult(null)
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      const response = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: formData,
+      })
+      if (!response.ok) {
+        setError("Upload failed. Is the backend running?")
+        return
+      }
+      const data = await response.json()
+      setResult(data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
 
   return (
     <div style={styles.container}>
       <h1 style={styles.heading}>Smoke and Mirrors</h1>
       
       <img style={styles.image} id="output" width="200" src={image} />
-      <input style={styles.fileInput} type="file" accept="image/*" id="file_input" onInput={(event) => setImage(URL.createObjectURL(event.target.files[0]))} />
+      <input style={styles.fileInput} type="file" accept="image/*" id="file_input" onInput={(event) => 
+        { const selectedFile = event.target.files[0]
+          setImage(URL.createObjectURL(selectedFile))
+          setFile(selectedFile)
+          setResult(null)
+          setError(null)
+        }} />
 
-      <button style={styles.button}>Check image</button>
+      <button style={styles.button} onClick = {handleCheck}> {loading ? "Analyzing..." : "Check image"} </button>
+
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {result && <pre style={{ color: '#aaa' }}>{JSON.stringify(result, null, 2)}</pre>}
     </div>
   );
 }
