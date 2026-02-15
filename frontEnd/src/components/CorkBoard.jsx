@@ -23,6 +23,22 @@ const RING_SPACING = 260
 const NODE_W = 160
 const NODE_H = 200
 
+const DUCK_DETECTIVE_QUOTES = [
+  'This crumb pattern screams inside job.',
+  'Follow the breadcrumbs, not your feelings.',
+  'Every pond has a suspect.',
+  'If it quacks like a cover-up, it is.',
+  'No alibi survives soggy bread logic.',
+  'The duck knows. The duck always knows.',
+  'Case note: dramatic lighting solves nothing.',
+  'Trust no beak with clean feathers.',
+  'Motive: envy. Method: repost.',
+  'Someone is lying and I can smell toast.',
+  'I solved this between two stale crackers.',
+  'Cross-posting is just gossip with timestamps.',
+  'the cake is a lie the cake is a lie the cake is a lie the cake is a lie the cake is a lie the cake is a lie',
+]
+
 function buildLayout(spreadData) {
   if (!spreadData) return { positions: {}, allNodes: [], allNodeMap: {}, visibleEdges: [] }
 
@@ -165,7 +181,9 @@ function usePanZoom() {
 
     setTransform((t) => {
       const rawFactor = Math.exp(-e.deltaY * 0.0014)
-      const zoomFactor = Math.min(1.03, Math.max(0.97, rawFactor))
+      const zoomFactor = e.deltaY > 0
+        ? Math.max(0.955, rawFactor)
+        : Math.min(1.03, Math.max(1.0, rawFactor))
       const nextScale = Math.min(2, Math.max(0.2, t.scale * zoomFactor))
 
       const worldX = (pointerX - t.x) / t.scale
@@ -306,6 +324,62 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
       ? uploadedNode.label
       : (selectedParentId ? allNodeMap?.[selectedParentId]?.label || selectedParentId : null)
 
+  const stickyNotes = useMemo(() => {
+    const matches = Number(summary?.total_matches || spreadData?.nodes?.length || 0)
+    const noteCount = matches > 0
+      ? Math.max(1, Math.min(6, Math.ceil(matches / 3)))
+      : 0
+    if (noteCount < 1) return []
+
+    const notes = []
+    const used = []
+    const quotePool = [...DUCK_DETECTIVE_QUOTES]
+    const minX = 180
+    const maxX = BOARD_W - 380
+    const minY = 120
+    const maxY = BOARD_H - 250
+
+    for (let i = 0; i < noteCount; i++) {
+      let x = 0
+      let y = 0
+      let attempts = 0
+
+      if (i === 0) {
+        x = Math.min(maxX, Math.max(minX, CENTER_X + 240 + Math.random() * 180))
+        y = Math.min(maxY, Math.max(minY, CENTER_Y - 300 + Math.random() * 150))
+      } else {
+        do {
+          x = minX + Math.random() * (maxX - minX)
+          y = minY + Math.random() * (maxY - minY)
+          attempts += 1
+        } while (
+          attempts < 20 &&
+          used.some((p) => Math.hypot(p.x - x, p.y - y) < 210)
+        )
+      }
+
+      used.push({ x, y })
+
+      let quote = DUCK_DETECTIVE_QUOTES[Math.floor(Math.random() * DUCK_DETECTIVE_QUOTES.length)]
+      if (quotePool.length > 0) {
+        const pick = Math.floor(Math.random() * quotePool.length)
+        quote = quotePool.splice(pick, 1)[0]
+      }
+      const tone = ['note-yellow', 'note-rose', 'note-mint', 'note-blue'][Math.floor(Math.random() * 4)]
+
+      notes.push({
+        id: `duck-note-${i}`,
+        x,
+        y,
+        rotate: -10 + Math.random() * 20,
+        quote,
+        tone,
+      })
+    }
+
+    return notes
+  }, [spreadData, summary?.total_matches])
+
   // Animation timing: yarn appears first, then nodes fade in by depth
   const BASE_DELAY = 400 // ms before first element appears
   const YARN_DURATION = 600 // ms per yarn line animation
@@ -382,6 +456,22 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
             )
           })}
         </svg>
+
+        {/* Uploaded image node */}
+        {stickyNotes.map((note) => (
+          <aside
+            key={note.id}
+            className={`sticky-note ${note.tone}`}
+            style={{
+              left: note.x,
+              top: note.y,
+              transform: `rotate(${note.rotate}deg)`,
+            }}
+          >
+            <p className="sticky-note-title">Duck Detective</p>
+            <p className="sticky-note-quote">"{note.quote}"</p>
+          </aside>
+        ))}
 
         {/* Uploaded image node */}
         {positions["__uploaded__"] && (

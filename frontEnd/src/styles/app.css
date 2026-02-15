@@ -510,6 +510,60 @@ body {
   pointer-events: none;
 }
 
+.sticky-note {
+  position: absolute;
+  width: 205px;
+  min-height: 96px;
+  padding: 0.55rem 0.62rem;
+  border: 1px solid rgba(40, 32, 24, 0.45);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
+  z-index: 6;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.sticky-note::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.35);
+  top: -2px;
+  left: calc(50% - 8px);
+  border-radius: 2px;
+}
+
+.sticky-note-title {
+  font-family: 'Bebas Neue', Impact, sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3a2a1b;
+  margin-bottom: 0.22rem;
+}
+
+.sticky-note-quote {
+  font-size: 0.78rem;
+  line-height: 1.25;
+  color: #2d2217;
+}
+
+.note-yellow {
+  background: #efd489;
+}
+
+.note-rose {
+  background: #e7b3aa;
+}
+
+.note-mint {
+  background: #b9dcc6;
+}
+
+.note-blue {
+  background: #bdd6e6;
+}
+
 .yarn-line {
   fill: none;
   stroke: var(--blood-red);
