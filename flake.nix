@@ -17,6 +17,7 @@
           uvicorn
           python-multipart
           python-dotenv
+          pip
 
           # Image processing & metadata
           pillow
