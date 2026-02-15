@@ -27,6 +27,9 @@ function ResultsPanel({
 
   const classifierSubtype = result?.analysis?.classifier_subtype || 'unknown'
   const canInvestigate = verdict === 'ai' || verdict === 'edited'
+  const metadataSignals = Array.isArray(metadata?.metadata_signals)
+    ? metadata.metadata_signals
+    : []
 
   return (
     <section className="results-panel">
@@ -46,6 +49,9 @@ function ResultsPanel({
             <p><strong>Classifier:</strong> {result?.analysis?.label || 'unknown'}</p>
             <p><strong>Subtype:</strong> {classifierSubtype}</p>
             <p><strong>Metadata signal:</strong> {metadata?.likely_edited || 'Unknown'}</p>
+            <p><strong>Metadata confidence:</strong> {metadata?.metadata_confidence || 'low'}</p>
+            <p><strong>Metadata reason:</strong> {metadata?.metadata_reason || 'No strong metadata signal found.'}</p>
+            <p><strong>Metadata tags:</strong> {metadataSignals.length ? metadataSignals.join(', ') : 'none'}</p>
             <p><strong>Software tag:</strong> {metadata?.software || 'n/a'}</p>
           </div>
 

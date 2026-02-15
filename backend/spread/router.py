@@ -231,6 +231,14 @@ def _node_tokens(node: dict[str, object]) -> set[str]:
     return _tokenize(label_text) | _tokenize(url_text)
 
 
+def _candidate_overlap_count(candidate: dict[str, object], terms: set[str]) -> int:
+    title = candidate.get("title")
+    title_text = title if isinstance(title, str) else None
+    url_text = str(candidate.get("url") or "")
+    overlap = _tokenize(title_text) | _tokenize(url_text)
+    return len(overlap & terms)
+
+
 def _edge_affinity(parent: dict[str, object], child: dict[str, object]) -> int:
     parent_url = str(parent.get("url") or "")
     child_url = str(child.get("url") or "")
@@ -316,7 +324,12 @@ def _apply_domain_cap(matches: list[dict], max_per_domain: int) -> tuple[list[di
     return kept, dropped
 
 
-def _candidate_score(candidate: dict[str, object], terms: set[str]) -> int:
+def _candidate_score(
+    candidate: dict[str, object],
+    terms: set[str],
+    *,
+    overlap_count: int | None = None,
+) -> int:
     match_type = str(candidate.get("match_type") or "")
     base = {
         "page_match": 120,
@@ -333,8 +346,8 @@ def _candidate_score(candidate: dict[str, object], terms: set[str]) -> int:
     score += min(_as_int(candidate.get("full_match_count")), 5) * 10
     score += min(_as_int(candidate.get("partial_match_count")), 5) * 5
 
-    overlap = _tokenize(title_text) | _tokenize(url_text)
-    overlap_count = len(overlap & terms)
+    if overlap_count is None:
+        overlap_count = _candidate_overlap_count(candidate, terms)
     score += min(overlap_count, 6) * 12
 
     if overlap_count == 0:
@@ -472,7 +485,13 @@ def _extract_source_and_matches(web_detection: dict) -> tuple[str | None, list[d
             continue
         seen.add(url)
 
-        candidate["evidence_score"] = _candidate_score(candidate, terms) + _source_affinity_bonus(url, source_root)
+        overlap_count = _candidate_overlap_count(candidate, terms)
+        candidate["term_overlap_count"] = overlap_count
+        candidate["evidence_score"] = _candidate_score(
+            candidate,
+            terms,
+            overlap_count=overlap_count,
+        ) + _source_affinity_bonus(url, source_root)
         ranked.append(candidate)
 
     ranked.sort(
@@ -489,6 +508,21 @@ def _extract_source_and_matches(web_detection: dict) -> tuple[str | None, list[d
     return source_url, ranked, ranked_terms
 
 
+def _is_related_candidate(candidate: dict[str, object], source_root: str | None) -> bool:
+    candidate_root = _root_domain(str(candidate.get("url") or ""))
+    if source_root and candidate_root == source_root:
+        return True
+
+    if _as_int(candidate.get("full_match_count")) >= 2:
+        return True
+    if _as_int(candidate.get("partial_match_count")) >= 2:
+        return True
+    if _as_int(candidate.get("term_overlap_count")) >= 2:
+        return True
+
+    return False
+
+
 def _normalize_graph(
     web_detection: dict,
     max_nodes: int,
@@ -496,9 +530,12 @@ def _normalize_graph(
     strict_filter: bool,
     min_evidence_score: int,
     max_per_domain: int,
+    drop_weak_connections: bool,
+    min_connection_affinity: int,
 ) -> dict:
     source_url, matches, query_terms = _extract_source_and_matches(web_detection)
     total_candidates = len(matches)
+    source_root = _root_domain(source_url)
 
     if strict_filter:
         matches = [
@@ -509,8 +546,14 @@ def _normalize_graph(
 
     strict_filtered_out_count = total_candidates - len(matches)
 
+    weak_candidate_dropped_count = 0
+    if drop_weak_connections:
+        before_related_filter = len(matches)
+        matches = [match for match in matches if _is_related_candidate(match, source_root)]
+        weak_candidate_dropped_count = before_related_filter - len(matches)
+
     matches, domain_capped_out_count = _apply_domain_cap(matches, max_per_domain)
-    filtered_out_count = strict_filtered_out_count + domain_capped_out_count
+    filtered_out_count = strict_filtered_out_count + weak_candidate_dropped_count + domain_capped_out_count
     matches = matches[:max_nodes]
 
     source = {
@@ -522,13 +565,10 @@ def _normalize_graph(
     }
 
     nodes = []
-    platforms = set()
-
     for idx, match in enumerate(matches, start=1):
         url = match["url"]
         node_id = f"n{idx}"
         platform = _platform_from_url(url)
-        platforms.add(platform)
         nodes.append(
             {
                 "id": node_id,
@@ -540,10 +580,46 @@ def _normalize_graph(
                 "evidence_score": int(match.get("evidence_score") or 0),
                 "full_match_count": int(match.get("full_match_count") or 0),
                 "partial_match_count": int(match.get("partial_match_count") or 0),
+                "term_overlap_count": int(match.get("term_overlap_count") or 0),
+                "same_root_as_source": bool(
+                    source_root and _root_domain(url) == source_root
+                ),
             }
         )
 
     edges = _build_path_edges(nodes)
+
+    weak_edge_dropped_count = 0
+    if drop_weak_connections:
+        node_by_id = {node["id"]: node for node in nodes}
+        filtered_edges = []
+        kept_node_ids = set()
+
+        for edge in edges:
+            affinity = _as_int(edge.get("affinity"))
+            child = node_by_id.get(edge.get("to"))
+            if child is None:
+                continue
+
+            has_strong_evidence = (
+                _as_int(child.get("full_match_count")) >= 2
+                or _as_int(child.get("partial_match_count")) >= 2
+                or _as_int(child.get("term_overlap_count")) >= 2
+                or bool(child.get("same_root_as_source"))
+            )
+
+            if affinity < min_connection_affinity and not has_strong_evidence:
+                weak_edge_dropped_count += 1
+                continue
+
+            filtered_edges.append(edge)
+            kept_node_ids.add(child["id"])
+
+        edges = filtered_edges
+        nodes = [node for node in nodes if node["id"] in kept_node_ids]
+
+    filtered_out_count += weak_edge_dropped_count
+    platforms = sorted({node["platform"] for node in nodes})
 
     return {
         "source": source,
@@ -551,7 +627,7 @@ def _normalize_graph(
         "edges": edges,
         "summary": {
             "total_matches": len(nodes),
-            "platforms": sorted(platforms),
+            "platforms": platforms,
             "mode": "live",
             "source_url_found": source_url is not None,
             "query_terms": query_terms,
@@ -559,8 +635,12 @@ def _normalize_graph(
             "min_evidence_score": min_evidence_score,
             "filtered_out_count": filtered_out_count,
             "strict_filtered_out_count": strict_filtered_out_count,
+            "weak_candidate_dropped_count": weak_candidate_dropped_count,
+            "weak_edge_dropped_count": weak_edge_dropped_count,
             "domain_capped_out_count": domain_capped_out_count,
             "max_per_domain": max_per_domain,
+            "drop_weak_connections": drop_weak_connections,
+            "min_connection_affinity": min_connection_affinity,
             "candidate_count": total_candidates,
             "edge_mode": "inferred_path",
         },
@@ -617,6 +697,8 @@ async def spread_from_image(
     strict_filter: bool = Query(True),
     min_evidence_score: int = Query(130, ge=0, le=400),
     max_per_domain: int = Query(2, ge=1, le=6),
+    drop_weak_connections: bool = Query(True),
+    min_connection_affinity: int = Query(22, ge=0, le=100),
 ):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -651,6 +733,8 @@ async def spread_from_image(
             strict_filter=strict_filter,
             min_evidence_score=min_evidence_score,
             max_per_domain=max_per_domain,
+            drop_weak_connections=drop_weak_connections,
+            min_connection_affinity=min_connection_affinity,
         )
     except VisionAPIError as exc:
         raise HTTPException(status_code=502, detail=_http_detail_for_error(exc)) from exc

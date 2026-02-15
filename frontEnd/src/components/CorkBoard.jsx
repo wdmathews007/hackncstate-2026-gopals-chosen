@@ -158,11 +158,25 @@ function usePanZoom() {
 
   const onWheel = useCallback((e) => {
     e.preventDefault()
-    const delta = e.deltaY > 0 ? 0.92 : 1.08
-    setTransform(t => ({
-      ...t,
-      scale: Math.min(2, Math.max(0.2, t.scale * delta)),
-    }))
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    const pointerX = e.clientX - rect.left
+    const pointerY = e.clientY - rect.top
+
+    setTransform((t) => {
+      const rawFactor = Math.exp(-e.deltaY * 0.0014)
+      const zoomFactor = Math.min(1.03, Math.max(0.97, rawFactor))
+      const nextScale = Math.min(2, Math.max(0.2, t.scale * zoomFactor))
+
+      const worldX = (pointerX - t.x) / t.scale
+      const worldY = (pointerY - t.y) / t.scale
+
+      return {
+        scale: nextScale,
+        x: pointerX - worldX * nextScale,
+        y: pointerY - worldY * nextScale,
+      }
+    })
   }, [])
 
   return { transform, onMouseDown, onMouseMove, onMouseUp, onWheel }

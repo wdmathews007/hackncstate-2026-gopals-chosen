@@ -10,6 +10,8 @@ const FORCE_FAKE_VERDICT = import.meta.env.VITE_FORCE_FAKE_VERDICT === 'true'
 const SPREAD_STRICT_FILTER = import.meta.env.VITE_SPREAD_STRICT_FILTER !== 'false'
 const SPREAD_MIN_EVIDENCE_SCORE = Number.parseInt(import.meta.env.VITE_SPREAD_MIN_EVIDENCE_SCORE || '130', 10) || 130
 const SPREAD_MAX_PER_DOMAIN = Number.parseInt(import.meta.env.VITE_SPREAD_MAX_PER_DOMAIN || '2', 10) || 2
+const SPREAD_DROP_WEAK_CONNECTIONS = import.meta.env.VITE_SPREAD_DROP_WEAK_CONNECTIONS !== 'false'
+const SPREAD_MIN_CONNECTION_AFFINITY = Number.parseInt(import.meta.env.VITE_SPREAD_MIN_CONNECTION_AFFINITY || '22', 10) || 22
 
 function deriveVerdict(uploadResult) {
   const classifierSubtype = String(uploadResult?.analysis?.classifier_subtype || '').toLowerCase()
@@ -136,6 +138,8 @@ function App() {
         strict_filter: String(SPREAD_STRICT_FILTER),
         min_evidence_score: String(SPREAD_MIN_EVIDENCE_SCORE),
         max_per_domain: String(SPREAD_MAX_PER_DOMAIN),
+        drop_weak_connections: String(SPREAD_DROP_WEAK_CONNECTIONS),
+        min_connection_affinity: String(SPREAD_MIN_CONNECTION_AFFINITY),
       })
 
       const response = await fetch(`${API_BASE_URL}/spread?${spreadParams.toString()}`, {

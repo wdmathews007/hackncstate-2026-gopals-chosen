@@ -26,6 +26,14 @@ SUSPICIOUS_KEYWORD_PHRASES = (
     "ai generated",
 )
 
+AI_HINT_TERMS = (
+    "midjourney",
+    "dalle",
+    "stable diffusion",
+    "stablediffusion",
+    "ai",
+)
+
 
 def _to_text(value):
     if value is None:
@@ -282,25 +290,89 @@ class ImageMetadata:
     def software(self):
         return _to_text(self.exif.get("Software"))
 
-    @property
-    def is_likely_edited(self):
-        if self.gps_longitude is not None and self.gps_latitude is not None:
-            return "Likely Real"
-
+    def _matched_suspicious_software(self):
         software_text = (self.software or "").lower()
-        if software_text and any(term in software_text for term in SUSPICIOUS_SOFTWARE):
-            return "Likely Edited"
+        if not software_text:
+            return None
+
+        for term in SUSPICIOUS_SOFTWARE:
+            if term in software_text:
+                return term
+        return None
+
+    def _matched_keyword_signal(self):
+        if not self.keywords:
+            return None
 
         keyword_blob = " ".join(self.keywords).lower()
-        if keyword_blob and any(term in keyword_blob for term in SUSPICIOUS_KEYWORD_PHRASES):
-            return "Likely Edited"
-        if _contains_ai_token(self.keywords):
-            return "Likely Edited"
+        for term in SUSPICIOUS_KEYWORD_PHRASES:
+            if term in keyword_blob:
+                return term
 
-        return "Unknown"
+        if _contains_ai_token(self.keywords):
+            return "ai"
+
+        return None
+
+    def metadata_signal_details(self):
+        signals = []
+
+        if self.gps_longitude is not None and self.gps_latitude is not None:
+            signals.append("gps_coordinates")
+            return {
+                "classification": "Likely Real",
+                "reason": "GPS coordinates are present in image metadata.",
+                "signals": signals,
+                "confidence": "high",
+            }
+
+        matched_software = self._matched_suspicious_software()
+        if matched_software:
+            signals.append("software_tag")
+            if matched_software in AI_HINT_TERMS:
+                signals.append("ai_tool_hint")
+            return {
+                "classification": "Likely Edited",
+                "reason": f"Suspicious software tag detected: {matched_software}.",
+                "signals": signals,
+                "confidence": "high",
+            }
+
+        matched_keyword = self._matched_keyword_signal()
+        if matched_keyword:
+            signals.append("iptc_keyword")
+            if matched_keyword in AI_HINT_TERMS:
+                signals.append("ai_keyword_hint")
+            return {
+                "classification": "Likely Edited",
+                "reason": f"Suspicious IPTC keyword detected: {matched_keyword}.",
+                "signals": signals,
+                "confidence": "medium",
+            }
+
+        if not self.exif and not self.keywords and not self.author and not self.caption:
+            signals.append("no_strong_metadata")
+            return {
+                "classification": "Unknown",
+                "reason": "No strong EXIF/IPTC signal found.",
+                "signals": signals,
+                "confidence": "low",
+            }
+
+        return {
+            "classification": "Unknown",
+            "reason": "Metadata is present but not strongly indicative.",
+            "signals": signals,
+            "confidence": "low",
+        }
+
+    @property
+    def is_likely_edited(self):
+        return self.metadata_signal_details()["classification"]
 
     def to_dict(self):
         capture_time = self.capture_time
+        signal_details = self.metadata_signal_details()
 
         return {
             "camera_type": self.camera_type,
@@ -317,5 +389,8 @@ class ImageMetadata:
             "author": self.author,
             "software": self.software,
             "iptc_date_created": str(self.iptc_date_created) if self.iptc_date_created else None,
-            "likely_edited": self.is_likely_edited,
+            "likely_edited": signal_details["classification"],
+            "metadata_reason": signal_details["reason"],
+            "metadata_signals": signal_details["signals"],
+            "metadata_confidence": signal_details["confidence"],
         }
