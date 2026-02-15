@@ -200,6 +200,7 @@ function App() {
           image={image}
           loading={uploadLoading}
           canCheck={Boolean(file)}
+          fileName={file?.name || ''}
           onFileSelect={handleFileSelect}
           onCheck={handleCheck}
         />

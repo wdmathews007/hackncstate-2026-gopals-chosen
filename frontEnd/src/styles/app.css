@@ -36,9 +36,10 @@ body {
   padding: 2rem 1rem;
   background-color: var(--ink-950);
   background-image:
-    /* repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.016) 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 6px); */
-    url("../image/wallduck.png");
+    linear-gradient(rgba(7, 6, 5, 0.72), rgba(7, 6, 5, 0.72)),
+    url("../image/wallDuck.png");
+  background-size: cover;
+  background-position: center;
 }
 
 .page-header {
@@ -72,13 +73,117 @@ body {
   padding: 1rem 1rem 1.2rem;
 }
 
-.file-input {
+.upload-zone {
+  padding: 0.85rem;
+  border: 1px solid #3d3128;
+  background-image:
+    linear-gradient(rgba(16, 13, 10, 0.86), rgba(16, 13, 10, 0.86)),
+    url("../image/wallDuck.png");
+  background-size: cover;
+  background-position: center;
+}
+
+.file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.file-picker {
   width: 100%;
   margin-bottom: 0.9rem;
-  padding: 0.7rem;
-  background: var(--ink-900);
+  padding: 0.68rem 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.72rem;
+  border: 2px dashed #6b5d4f;
+  background: linear-gradient(180deg, #1b1714 0%, #13110f 100%);
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.18s ease, background 0.2s ease;
+}
+
+.file-picker:hover {
+  border-color: #d0a765;
+  transform: translateY(-1px);
+  background: linear-gradient(180deg, #251f1a 0%, #18130f 100%);
+}
+
+.file-picker-selected {
+  border-style: solid;
+  border-color: var(--moss);
+  background: linear-gradient(180deg, #1b2017 0%, #131810 100%);
+}
+
+.bread-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid #5f5144;
+  border-radius: 999px;
+  background: #241f1a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.bread-icon-svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.bread-crust {
+  fill: #c7853f;
+}
+
+.bread-crumb {
+  fill: #f1d293;
+}
+
+.bread-dot {
+  fill: #cfab68;
+}
+
+.file-picker-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.file-picker-title {
+  color: var(--paper-200);
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-picker-subtitle {
   color: var(--paper-300);
-  border: 1px solid var(--line-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.file-picker-cta {
+  margin-left: auto;
+  border: 1px solid #7b6654;
+  background: #2b241e;
+  color: #f3e8d7;
+  font-size: 0.7rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 0.28rem 0.48rem;
+  white-space: nowrap;
+}
+
+.file-picker-selected .file-picker-cta {
+  border-color: #6b8b61;
+  background: #243121;
+  color: #d8efd0;
 }
 
 .preview-image {
@@ -573,6 +678,33 @@ body {
 
   .app-card {
     padding: 0.8rem;
+  }
+
+  .upload-zone {
+    padding: 0.65rem;
+  }
+
+  .file-picker {
+    gap: 0.55rem;
+    padding: 0.6rem 0.62rem;
+  }
+
+  .bread-icon {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .file-picker-title {
+    font-size: 0.8rem;
+  }
+
+  .file-picker-subtitle {
+    font-size: 0.64rem;
+  }
+
+  .file-picker-cta {
+    font-size: 0.64rem;
+    padding: 0.22rem 0.4rem;
   }
 
   .corkboard-viewport {
