@@ -1,7 +1,6 @@
-function UploadForm({ image, loading, onFileSelect, onCheck }) {
+function UploadForm({ image, loading, onFileSelect, onCheck, canCheck }) {
   function handleInput(event) {
     const selectedFile = event.target.files[0]
-    console.log('UploadForm: File selected ->', selectedFile?.name)
     if (selectedFile) {
       onFileSelect(selectedFile)
     }
@@ -20,7 +19,7 @@ function UploadForm({ image, loading, onFileSelect, onCheck }) {
       <button
         className="check-button"
         onClick={onCheck}
-        disabled={loading}
+        disabled={loading || !canCheck}
       >
         {loading ? <span className="loading-text">Analyzing...</span> : "Check image"}
       </button>

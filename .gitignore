@@ -47,3 +47,21 @@ logs/
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+backend/.env
+backend/.env.*
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+
+# ── Model checkpoints (large, local-only) ──────────────────────────────────────
+backend/models/*.pth
+backend/models/*.pt
+
+# ── Runtime uploads ────────────────────────────────────────────────────────────
+backend/upload/pictures/*
+!backend/upload/pictures/.gitkeep
