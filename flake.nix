@@ -24,6 +24,17 @@
           exifread
           opencv4
           numpy
+          (ps.buildPythonPackage rec {
+            pname = "iptcinfo3";
+            version = "2.3.0";
+            pyproject = true;
+            src = ps.fetchPypi {
+              inherit pname version;
+              sha256 = "aee2ee68b6b77aa6e317eed956ff36affc7dfba033c95458026815fa41b4a5e6";
+            };
+            build-system = with ps; [ hatchling ];
+            doCheck = false;
+          })
 
           # ML inference
           torch
