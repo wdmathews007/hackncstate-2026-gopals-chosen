@@ -1,38 +1,59 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, FastAPI
-import uuid, os, string
 from pathlib import Path
-from PIL import Image
-from ImageMetadata import ImageMetadata
+from uuid import uuid4
 
-app = FastAPI()
-router = APIRouter()
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from PIL import Image, UnidentifiedImageError
 
-UPLOAD_DIR = Path(str(Path(__file__).parent.parent)+"/upload/pictures").mkdir(parents=True,exist_ok=True)
-#os.mkdir(UPLOAD_DIR,parents=True,exist_ok=True)
+try:
+    from ..ImageMetadata import ImageMetadata
+except ImportError:
+    from ImageMetadata import ImageMetadata
 
-@app.post("/upload/")
-async def upload_file(UF:UploadFile):
-    #UF=File(...)
-    if(UF.content_type.startswith("image/") == True):
-    
-        raise HTTPException("File not image type")
-    
-    
-    file = open(UF.filename, "r")
-    filename= f"{uuid.uuid4().hex}_{file.filename}"
-    content = await file.read()
-    with open(Path(str(UPLOAD_DIR) + filename), "w") as f:
-        f.write(content)
 
-    # THe file_path can be changed
-    image = Image.open(file_path)
+router = APIRouter(tags=["upload"])
 
-    # Takes the image object and creates a Metadata object for it
-    meta = ImageMetadata(image)
+UPLOAD_DIR = Path(__file__).resolve().parent / "pictures"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-    return {"filename":filename,"status":"uploaded","analysis":{"label":"unknown","confidence":0.0,"metadata": meta.to_dict(),"heatmap_url":None}}
 
-@app.post("/")
-async def test():
-    print("I guess this works")
-    return("working")
+def _is_image_upload(upload: UploadFile) -> bool:
+    return bool(upload.content_type and upload.content_type.startswith("image/"))
+
+
+@router.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    if not _is_image_upload(file):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    original_name = Path(file.filename or "upload").name
+    stored_name = f"{uuid4().hex}_{original_name}"
+    saved_path = UPLOAD_DIR / stored_name
+
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+        saved_path.write_bytes(content)
+
+        with Image.open(saved_path) as image:
+            metadata = ImageMetadata(image).to_dict()
+
+    except UnidentifiedImageError as exc:
+        if saved_path.exists():
+            saved_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Invalid image file") from exc
+    finally:
+        await file.close()
+
+    return {
+        "filename": stored_name,
+        "status": "uploaded",
+        "file_path": str(saved_path),
+        "analysis": {
+            "label": "unknown",
+            "confidence": 0.0,
+            "metadata": metadata,
+            "heatmap_url": None,
+        },
+    }

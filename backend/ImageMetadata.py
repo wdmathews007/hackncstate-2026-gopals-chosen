@@ -91,18 +91,31 @@ class ImageMetadata:
             else:
                 return
 
+            def iptc_get(field_name):
+                try:
+                    value = info[field_name]
+                    if value in (b"", "", None):
+                        return None
+                    return value
+                except Exception:
+                    return None
+
             # Extract IPTC fields
-            self._caption = info.get("caption/abstract")
-            self.keywords = info.get("keywords") or []
+            self._caption = iptc_get("caption/abstract")
+            self.keywords = iptc_get("keywords") or []
             if isinstance(self.keywords, str):
                 self.keywords = [self.keywords]
-            self.author = info.get("byline")
+            self.author = iptc_get("byline")
 
             # IPTC date
-            date_str = info.get("date created")
-            time_str = info.get("time created")
+            date_str = iptc_get("date created")
+            time_str = iptc_get("time created")
             if date_str:
                 try:
+                    if isinstance(date_str, bytes):
+                        date_str = date_str.decode(errors="ignore")
+                    if isinstance(time_str, bytes):
+                        time_str = time_str.decode(errors="ignore")
                     dt = datetime.strptime(date_str, "%Y%m%d")
                     if time_str:
                         dt = datetime.combine(dt.date(), datetime.strptime(time_str, "%H%M%S").time())
@@ -166,7 +179,7 @@ class ImageMetadata:
     
     @property
     def is_likely_edited(self):
-        if self.gps_longitude is not None and self.gps_lattitude is not None:
+        if self.gps_longitude is not None and self.gps_latitude is not None:
             return "Likely Real"
         
         # Check software for editing or AI tools
@@ -179,6 +192,8 @@ class ImageMetadata:
             lower_keywords = [k.lower() for k in self.keywords if isinstance(k, str)]
             if any(word in lower_keywords for word in ["ai", "midjourney", "dalle", "photoshop"]):
                 return "Likely Edited"
+
+        return "Unknown"
 
 
     def to_dict(self):
