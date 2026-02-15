@@ -1,6 +1,8 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, FastAPI
 import uuid, os, string
 from pathlib import Path
+from PIL import Image
+from ImageMetadata import ImageMetadata
 
 app = FastAPI()
 router = APIRouter()
@@ -22,7 +24,13 @@ async def upload_file(UF:UploadFile):
     with open(Path(str(UPLOAD_DIR) + filename), "w") as f:
         f.write(content)
 
-    return {"filename":filename,"status":"uploaded","analysis":{"label":"unknown","confidence":0.0,"metadata": {},"heatmap_url":None}}
+    # THe file_path can be changed
+    image = Image.open(file_path)
+
+    # Takes the image object and creates a Metadata object for it
+    meta = ImageMetadata(image)
+
+    return {"filename":filename,"status":"uploaded","analysis":{"label":"unknown","confidence":0.0,"metadata": meta.to_dict(),"heatmap_url":None}}
 
 @app.post("/")
 async def test():
