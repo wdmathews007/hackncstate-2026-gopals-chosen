@@ -5,8 +5,8 @@ from pathlib import Path
 app = FastAPI()
 router = APIRouter()
 
-UPLOAD_DIR = Path(str(Path(__file__).parent.parent)+"/upload/pictures")
-os.mkdir(UPLOAD_DIR,parents=True,exist_ok=True)
+UPLOAD_DIR = Path(str(Path(__file__).parent.parent)+"/upload/pictures").mkdir(parents=True,exist_ok=True)
+#os.mkdir(UPLOAD_DIR,parents=True,exist_ok=True)
 
 @app.post("/upload/")
 async def upload_file(UploadFile: UploadFile):

@@ -10,12 +10,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_orgins=["fastapi.middleware.cors"],
+    allow_origins=["http://localhost:5173"],
     allow_methods=[""],
     allow_headers=[""],
     allow_credentials=True,
 )
-app.include_router(upload_router)
+app.include_router(router)
+
 @app.get("/")
 async def heath():
     return{"status":"ok i guess"}
