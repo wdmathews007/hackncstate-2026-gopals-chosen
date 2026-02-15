@@ -1,5 +1,5 @@
 {
-  description = "Smoke and Mirrors";
+  description = "Breadcrumbs";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

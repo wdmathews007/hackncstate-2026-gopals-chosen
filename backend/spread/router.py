@@ -2,7 +2,7 @@ import base64
 import os
 from datetime import date, timedelta
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 from dotenv import load_dotenv
@@ -13,6 +13,65 @@ router = APIRouter(tags=["spread"])
 
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(ENV_PATH)
+
+TRACKING_QUERY_KEYS = {
+    "fbclid",
+    "gclid",
+    "igshid",
+    "mc_cid",
+    "mc_eid",
+    "ref",
+    "ref_src",
+    "source",
+    "utm_campaign",
+    "utm_content",
+    "utm_medium",
+    "utm_source",
+    "utm_term",
+}
+
+
+class VisionAPIError(Exception):
+    def __init__(self, message: str, *, status: str | None = None, code: int | None = None):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.code = code
+
+
+def _sanitize_error_message(message: str | None) -> str:
+    text = " ".join(str(message or "Vision API error").split())
+    if len(text) > 260:
+        return f"{text[:257]}..."
+    return text
+
+
+def _canonicalize_url(url: str | None) -> str | None:
+    if not url:
+        return None
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not parsed.netloc:
+        return None
+
+    host = parsed.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+
+    path = parsed.path or "/"
+    if path != "/":
+        path = path.rstrip("/")
+
+    filtered_query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=False)
+        if key.lower() not in TRACKING_QUERY_KEYS
+    ]
+    query = urlencode(filtered_query, doseq=True)
+
+    return urlunparse((parsed.scheme, host, path, "", query, ""))
 
 
 def _platform_from_url(url: str) -> str:
@@ -56,23 +115,41 @@ def _vision_web_detection(image_bytes: bytes, api_key: str) -> dict:
         ]
     }
 
-    response = requests.post(
-        endpoint,
-        params={"key": api_key},
-        json=body,
-        timeout=20,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.post(
+            endpoint,
+            params={"key": api_key},
+            json=body,
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise VisionAPIError("Unable to reach Google Vision API", status="UNAVAILABLE") from exc
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise VisionAPIError("Google Vision API returned a non-JSON response") from exc
+
+    if response.status_code >= 400:
+        error_data = payload.get("error") if isinstance(payload, dict) else None
+        message = _sanitize_error_message((error_data or {}).get("message"))
+        status = (error_data or {}).get("status")
+        code = (error_data or {}).get("code")
+        raise VisionAPIError(message, status=status, code=code)
+
     responses = payload.get("responses") or []
     if not responses:
-        raise ValueError("Vision API returned no responses")
+        raise VisionAPIError("Vision API returned no responses")
 
     response_payload = responses[0]
     if response_payload.get("error"):
-        message = response_payload["error"].get("message", "Vision API error")
-        raise ValueError(message)
+        error_data = response_payload["error"]
+        message = _sanitize_error_message(error_data.get("message"))
+        raise VisionAPIError(
+            message,
+            status=error_data.get("status"),
+            code=error_data.get("code"),
+        )
 
     return response_payload.get("webDetection", {})
 
@@ -83,31 +160,43 @@ def _extract_source_and_urls(web_detection: dict) -> tuple[str | None, list[str]
     partial_images = web_detection.get("partialMatchingImages") or []
     similar_images = web_detection.get("visuallySimilarImages") or []
 
-    source_url = None
-    if pages and pages[0].get("url"):
-        source_url = pages[0]["url"]
-    elif full_images and full_images[0].get("url"):
-        source_url = full_images[0]["url"]
+    def first_valid_url(items: list[dict]) -> str | None:
+        for item in items:
+            normalized = _canonicalize_url(item.get("url"))
+            if normalized:
+                return normalized
+        return None
+
+    source_url = (
+        first_valid_url(pages)
+        or first_valid_url(full_images)
+        or first_valid_url(partial_images)
+        or first_valid_url(similar_images)
+    )
 
     seen = set()
     urls = []
 
     def add_url(candidate: str | None):
-        if not candidate or not candidate.startswith("http"):
+        normalized = _canonicalize_url(candidate)
+        if not normalized:
             return
-        if candidate in seen:
+        if normalized == source_url or normalized in seen:
             return
-        seen.add(candidate)
-        urls.append(candidate)
+        seen.add(normalized)
+        urls.append(normalized)
 
     for page in pages:
         add_url(page.get("url"))
 
-    for image_data in full_images + partial_images + similar_images:
+    for image_data in full_images:
         add_url(image_data.get("url"))
 
-    if source_url:
-        urls = [url for url in urls if url != source_url]
+    for image_data in partial_images:
+        add_url(image_data.get("url"))
+
+    for image_data in similar_images:
+        add_url(image_data.get("url"))
 
     return source_url, urls
 
@@ -155,8 +244,44 @@ def _normalize_graph(web_detection: dict, max_nodes: int) -> dict:
         "summary": {
             "total_matches": len(nodes),
             "platforms": sorted(platforms),
+            "mode": "live",
         },
     }
+
+
+def _fallback_reason_for_error(exc: VisionAPIError) -> str:
+    status = (exc.status or "").upper()
+    message = (exc.message or "").lower()
+
+    if "bad image data" in message:
+        return "vision_bad_image_data"
+    if "billing" in message:
+        return "vision_billing_required"
+    if "disabled" in message or "not been used" in message:
+        return "vision_api_disabled"
+
+    if status == "PERMISSION_DENIED":
+        return "vision_permission_denied"
+
+    if status == "INVALID_ARGUMENT":
+        return "vision_invalid_argument"
+
+    if status == "UNAUTHENTICATED":
+        return "vision_unauthenticated"
+    if status == "RESOURCE_EXHAUSTED":
+        return "vision_quota_exceeded"
+    if status == "UNAVAILABLE":
+        return "vision_unavailable"
+    if status:
+        return f"vision_{status.lower()}"
+    return "vision_api_error"
+
+
+def _http_detail_for_error(exc: VisionAPIError) -> str:
+    message = _sanitize_error_message(exc.message)
+    if exc.status:
+        return f"Vision API error ({exc.status}): {message}"
+    return f"Vision API error: {message}"
 
 
 def _mock_graph(filename: str | None, max_nodes: int, reason: str) -> dict:
@@ -202,6 +327,7 @@ def _mock_graph(filename: str | None, max_nodes: int, reason: str) -> dict:
         "summary": {
             "total_matches": len(nodes),
             "platforms": platforms,
+            "mode": "fallback",
             "fallback": True,
             "reason": reason,
         },
@@ -231,17 +357,8 @@ async def spread_from_image(
 
     try:
         web_detection = _vision_web_detection(image_bytes, api_key)
-        graph = _normalize_graph(web_detection, max_nodes)
-
-        if graph["summary"]["total_matches"] == 0 and use_mock_fallback:
-            return _mock_graph(file.filename, max_nodes, "vision_no_matches")
-
-        return graph
-    except requests.RequestException as exc:
+        return _normalize_graph(web_detection, max_nodes)
+    except VisionAPIError as exc:
         if use_mock_fallback:
-            return _mock_graph(file.filename, max_nodes, f"vision_http_error:{type(exc).__name__}")
-        raise HTTPException(status_code=502, detail="Vision API request failed") from exc
-    except ValueError as exc:
-        if use_mock_fallback:
-            return _mock_graph(file.filename, max_nodes, f"vision_parse_error:{type(exc).__name__}")
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+            return _mock_graph(file.filename, max_nodes, _fallback_reason_for_error(exc))
+        raise HTTPException(status_code=502, detail=_http_detail_for_error(exc)) from exc

@@ -11,7 +11,16 @@ const PLATFORM_ICONS = {
   imgur: "im",
 }
 
-function PinnedPhoto({ node, isSource, isUploaded, uploadedImage, style, animDelay }) {
+function PinnedPhoto({
+  node,
+  isSource,
+  isUploaded,
+  uploadedImage,
+  style,
+  animDelay,
+  onSelect,
+  isActive,
+}) {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
@@ -25,11 +34,28 @@ function PinnedPhoto({ node, isSource, isUploaded, uploadedImage, style, animDel
     "pinned-photo",
     isSource ? "pinned-source" : "",
     isUploaded ? "pinned-uploaded" : "",
+    onSelect ? "pinned-selectable" : "",
+    isActive ? "pinned-active" : "",
     visible ? "pinned-visible" : "",
   ].filter(Boolean).join(" ")
 
+  const interactiveProps = onSelect
+    ? {
+      role: 'button',
+      tabIndex: 0,
+      onClick: () => onSelect(node),
+      onKeyDown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect(node)
+        }
+      },
+      'aria-label': `View details for ${node.label}`,
+    }
+    : {}
+
   return (
-    <div className={classes} style={style}>
+    <div className={classes} style={style} {...interactiveProps}>
       <div className="pin" />
       <div className="polaroid">
         {isUploaded && uploadedImage ? (

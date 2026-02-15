@@ -10,7 +10,7 @@ except ImportError:
 
 
 app = FastAPI(
-    title="Smoke and Mirrors",
+    title="Breadcrumbs",
     description="Who looks at these",
 )
 

@@ -24,42 +24,42 @@ const NODE_W = 160
 const NODE_H = 200
 
 function buildLayout(spreadData) {
-  if (!spreadData) return { positions: {}, allNodes: [] }
+  if (!spreadData) return { positions: {}, allNodes: [], allNodeMap: {}, visibleEdges: [] }
 
   const { source, nodes, edges } = spreadData
+  const nodeById = Object.fromEntries(nodes.map((node) => [node.id, node]))
 
   // Build adjacency list (directed, from source outward)
   const children = {}
   for (const e of edges) {
+    if (!e?.from || !e?.to) continue
     if (!children[e.from]) children[e.from] = []
     children[e.from].push(e.to)
   }
 
-  // BFS from source to assign ring depths
+  // BFS from source to keep only nodes reachable from source
   const depth = { [source.id]: 0 }
+  const reachableIds = new Set([source.id])
   const queue = [source.id]
   while (queue.length > 0) {
     const cur = queue.shift()
     for (const child of children[cur] || []) {
+      if (!nodeById[child]) continue
       if (depth[child] === undefined) {
+        reachableIds.add(child)
         depth[child] = depth[cur] + 1
         queue.push(child)
       }
     }
   }
 
-  // Also assign depth to any orphan nodes (not reachable from source)
-  const maxDepth = Math.max(0, ...Object.values(depth))
-  for (const n of nodes) {
-    if (depth[n.id] === undefined) {
-      depth[n.id] = maxDepth + 1
-    }
-  }
+  const visibleNodes = nodes.filter((n) => reachableIds.has(n.id))
+  const visibleEdges = edges.filter((e) => reachableIds.has(e.from) && reachableIds.has(e.to))
 
   // Group nodes by depth ring
   const rings = {}
   const allNodeMap = { [source.id]: source }
-  for (const n of nodes) {
+  for (const n of visibleNodes) {
     allNodeMap[n.id] = n
     const d = depth[n.id]
     if (!rings[d]) rings[d] = []
@@ -106,10 +106,10 @@ function buildLayout(spreadData) {
     }
   }
 
-  // Build full node list (source + nodes)
-  const allNodes = [source, ...nodes]
+  // Build full node list (source + reachable nodes)
+  const allNodes = [source, ...visibleNodes]
 
-  return { positions, allNodes, allNodeMap }
+  return { positions, allNodes, allNodeMap, visibleEdges }
 }
 
 // ── Yarn path (slightly wavy bezier) ────────────────────────────────────────
@@ -139,7 +139,7 @@ function usePanZoom() {
 
   const onMouseDown = useCallback((e) => {
     // Only pan on middle-click or left-click on the board background
-    if (e.target.closest('.pinned-photo')) return
+    if (e.target.closest('.pinned-photo, .back-button, .node-drawer')) return
     isPanning.current = true
     lastPos.current = { x: e.clientX, y: e.clientY }
   }, [])
@@ -173,8 +173,9 @@ function usePanZoom() {
 function CorkBoard({ spreadData, uploadedImage, onBack }) {
   const boardRef = useRef(null)
   const { transform, onMouseDown, onMouseMove, onMouseUp, onWheel } = usePanZoom()
+  const [selectedNodeId, setSelectedNodeId] = useState(null)
 
-  const { positions, allNodes } = useMemo(
+  const { positions, allNodes, allNodeMap, visibleEdges } = useMemo(
     () => buildLayout(spreadData),
     [spreadData]
   )
@@ -189,12 +190,27 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
 
   if (!spreadData) return null
 
-  const { source, edges } = spreadData
+  const { source } = spreadData
+  const uploadedNode = {
+    id: '__uploaded__',
+    label: 'Your Upload',
+    platform: 'upload',
+    date: 'now',
+    url: null,
+  }
+
+  const selectedNode = selectedNodeId === '__uploaded__'
+    ? uploadedNode
+    : allNodeMap?.[selectedNodeId] || null
+
+  function handleSelectNode(node) {
+    setSelectedNodeId(node.id)
+  }
 
   // Build yarn edges: source → nodes, plus uploaded → source
   const allEdges = [
     { from: "__uploaded__", to: source.id },
-    ...edges,
+    ...visibleEdges,
   ]
 
   // Animation timing: yarn appears first, then nodes fade in by depth
@@ -209,7 +225,7 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
   // Source appears next
   nodeDelays[source.id] = BASE_DELAY + NODE_STAGGER
   // Other nodes by their order in the data
-  spreadData.nodes.forEach((n, i) => {
+  allNodes.slice(1).forEach((n, i) => {
     nodeDelays[n.id] = BASE_DELAY + NODE_STAGGER * (i + 2)
   })
 
@@ -267,9 +283,11 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
         {/* Uploaded image node */}
         {positions["__uploaded__"] && (
           <PinnedPhoto
-            node={{ id: "__uploaded__", label: "Your Upload", platform: "upload", date: "now" }}
+            node={uploadedNode}
             isUploaded
             uploadedImage={uploadedImage}
+            isActive={selectedNodeId === '__uploaded__'}
+            onSelect={handleSelectNode}
             style={{
               position: 'absolute',
               left: positions["__uploaded__"].x,
@@ -288,6 +306,8 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
               key={node.id}
               node={node}
               isSource={node.id === source.id}
+              isActive={selectedNodeId === node.id}
+              onSelect={handleSelectNode}
               style={{
                 position: 'absolute',
                 left: pos.x,
@@ -297,6 +317,38 @@ function CorkBoard({ spreadData, uploadedImage, onBack }) {
             />
           )
         })}
+
+        {selectedNode && (
+          <aside className="node-drawer" aria-live="polite">
+            <div className="node-drawer-header">
+              <h2 className="node-drawer-title">Node Details</h2>
+              <button
+                className="node-drawer-close"
+                onClick={() => setSelectedNodeId(null)}
+                aria-label="Close node details"
+              >
+                X
+              </button>
+            </div>
+
+            <p><strong>Label:</strong> {selectedNode.label}</p>
+            <p><strong>Platform:</strong> {selectedNode.platform}</p>
+            <p><strong>Date:</strong> {selectedNode.date}</p>
+
+            {selectedNode.url ? (
+              <a
+                className="node-drawer-link"
+                href={selectedNode.url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open Source
+              </a>
+            ) : (
+              <p className="node-drawer-muted">No public URL</p>
+            )}
+          </aside>
+        )}
       </div>
     </div>
   )

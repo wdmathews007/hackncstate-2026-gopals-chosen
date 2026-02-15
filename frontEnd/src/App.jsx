@@ -9,6 +9,7 @@ import MOCK_SPREAD_MEDIUM from './data/mockSpread'
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 const FORCE_LOCAL_SPREAD_MOCK = import.meta.env.VITE_FORCE_LOCAL_SPREAD_MOCK === 'true'
 const USE_SPREAD_FALLBACK = import.meta.env.VITE_USE_SPREAD_FALLBACK !== 'false'
+const FORCE_FAKE_VERDICT = import.meta.env.VITE_FORCE_FAKE_VERDICT !== 'false'
 
 function deriveVerdict(uploadResult) {
   const classifierLabel = String(uploadResult?.analysis?.label || '').toLowerCase()
@@ -136,7 +137,7 @@ function App() {
       const data = await response.json()
       setSpreadData(data)
       setPhase('investigate')
-    } catch (err) {
+    } catch {
       setSpreadError('Spread lookup failed. Using local mock graph for now.')
       setSpreadData(MOCK_SPREAD_MEDIUM)
       setPhase('investigate')
@@ -145,7 +146,7 @@ function App() {
     }
   }
 
-  const verdict = deriveVerdict(result)
+  const verdict = FORCE_FAKE_VERDICT ? 'fake' : deriveVerdict(result)
 
   if (phase === 'investigate' && spreadData) {
     return (
