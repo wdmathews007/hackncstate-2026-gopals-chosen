@@ -54,6 +54,7 @@ function buildLayout(spreadData) {
   }
 
   // BFS from source to keep only nodes reachable from source
+  // shouldve done bellmans or A* to show source finding better rather than volume
   const depth = { [source.id]: 0 }
   const reachableIds = new Set([source.id])
   const queue = [source.id]
